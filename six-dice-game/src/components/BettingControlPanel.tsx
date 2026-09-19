@@ -1,18 +1,20 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
   TouchableOpacity,
+  TextInput,
   StyleSheet,
   Platform,
   Image,
+  Pressable,
 } from 'react-native';
-import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
 import { Colors } from '../constants/colors';
 import { useGameStore } from '../store/gameStore';
+import { useAuthStore } from '../store/authStore';
 
-// Face images (replace with transparent PNGs if you want alpha backgrounds)
+// Face images
 const FACE_MODULES = [
   require('../../assets/dice-faces/png/bat.png'),
   require('../../assets/dice-faces/png/dimond.png'),
@@ -21,11 +23,35 @@ const FACE_MODULES = [
   require('../../assets/dice-faces/png/tree.png'),
   require('../../assets/dice-faces/png/WhatsApp Image 2026-09-05 at 12.09.12.png'),
 ];
-const BET_INCREMENTS = [10, 50, 100, 500];
+
+const FACE_NAMES = ['BAT', 'DIAMOND', 'HEART', 'LEAF', 'TREE', 'CROWN'];
+const PRESET_AMOUNTS = [10, 50, 100, 500, 1000];
 
 const BettingControlPanel: React.FC = () => {
-  const { hapticEnabled, selectedNumber, setSelectedNumber } = useGameStore();
-  const [betAmount, setBetAmount] = useState<number>(1000);
+  const {
+    hapticEnabled,
+    selectedNumber,
+    setSelectedNumber,
+    betAmount,
+    setBetAmount,
+    myBets,
+    serverPhase,
+  } = useGameStore();
+
+  const { walletBalance } = useAuthStore();
+  const inputRef = useRef<TextInput>(null);
+
+  const [inputVal, setInputVal] = useState<string>(betAmount.toString());
+  const [isFocused, setIsFocused] = useState<boolean>(false);
+
+  // Sync input string when betAmount changes externally (only when not actively typing)
+  useEffect(() => {
+    if (!isFocused) {
+      setInputVal(betAmount > 0 ? betAmount.toString() : '1');
+    }
+  }, [betAmount, isFocused]);
+
+  const isBettingOpen = serverPhase === 'BETTING_OPEN';
 
   const triggerHaptic = () => {
     if (hapticEnabled && Platform.OS !== 'web') {
@@ -38,49 +64,116 @@ const BettingControlPanel: React.FC = () => {
     setSelectedNumber(num);
   };
 
-  const handleAdjustBet = (delta: number) => {
+  const handleSetPreset = (amount: number) => {
     triggerHaptic();
-    setBetAmount((prev) => Math.max(10, prev + delta));
-  };
-
-  const handleAddPreset = (amount: number) => {
-    triggerHaptic();
-    setBetAmount((prev) => prev + amount);
+    setBetAmount(amount);
+    setInputVal(amount.toString());
+    inputRef.current?.blur();
   };
 
   const handleMaxBet = () => {
     triggerHaptic();
-    setBetAmount(5000);
+    const maxAmount = walletBalance > 0 ? walletBalance : 1;
+    setBetAmount(maxAmount);
+    setInputVal(maxAmount.toString());
+    inputRef.current?.blur();
   };
+
+  const handleAdjustBet = (delta: number) => {
+    triggerHaptic();
+    const current = parseInt(inputVal, 10) || betAmount || 1;
+    const newAmt = Math.max(1, current + delta);
+    setBetAmount(newAmt);
+    setInputVal(newAmt.toString());
+  };
+
+  const handleInputChange = (text: string) => {
+    // Only allow numeric digits
+    const cleaned = text.replace(/[^0-9]/g, '');
+    setInputVal(cleaned);
+
+    if (cleaned === '') {
+      return;
+    }
+
+    const parsed = parseInt(cleaned, 10);
+    if (!isNaN(parsed) && parsed > 0) {
+      setBetAmount(parsed);
+    }
+  };
+
+  const handleInputBlur = () => {
+    setIsFocused(false);
+    const parsed = parseInt(inputVal, 10);
+    if (isNaN(parsed) || parsed < 1) {
+      setBetAmount(1);
+      setInputVal('1');
+    } else {
+      setBetAmount(parsed);
+      setInputVal(parsed.toString());
+    }
+  };
+
+  const handleFocusInput = () => {
+    inputRef.current?.focus();
+  };
+
+  // Helper to sum user's placed bets on each face for the active round
+  const getUserBetOnFace = (faceNum: number) => {
+    const faceBets = myBets.filter((b) => b.selectedNumber === faceNum);
+    return faceBets.reduce((sum, b) => sum + b.amount, 0);
+  };
+
+  const isMaxActive = walletBalance > 0 && betAmount === walletBalance;
 
   return (
     <View style={styles.container}>
-
-      {/* 2. Number Selector Section */}
+      {/* 1. Header Row */}
       <View style={styles.selectorHeader}>
         <Text style={styles.selectorTitle}>PICK A FACE</Text>
-        <Text style={styles.selectorSubtitle}>CHOOSE YOUR LUCKY FACE</Text>
+        <Text style={styles.selectorSubtitle}>
+          {isBettingOpen ? 'CHOOSE YOUR LUCKY FACE' : 'BETTING LOCKED'}
+        </Text>
       </View>
 
+      {/* 2. 6 Dice Faces Grid (Borderless Clean Icons) */}
       <View style={styles.numberGrid}>
         {FACE_MODULES.map((mod, idx) => {
           const num = idx + 1;
           const isSelected = selectedNumber === num;
+          const placedBetAmount = getUserBetOnFace(num);
+
           return (
             <TouchableOpacity
               key={num}
-              style={styles.numberCard}
+              style={styles.faceTouchable}
               onPress={() => handleSelectNumber(num)}
-              activeOpacity={0.85}
+              activeOpacity={0.8}
             >
-              <View style={[styles.cardInner, isSelected && styles.selectedInner]}>
+              <View style={styles.faceWrapper}>
+                {/* Selected Glow Aura */}
                 {isSelected ? (
-                  <View style={styles.imageWrap} pointerEvents="none">
-                    <Image source={mod} style={[styles.faceImage, styles.glowImage]} blurRadius={8} />
-                    <Image source={mod} style={styles.faceImage} />
+                  <View style={styles.selectedGlowWrap} pointerEvents="none">
+                    <Image source={mod} style={styles.glowImage} blurRadius={10} />
+                    <Image source={mod} style={[styles.faceImage, styles.selectedFaceImage]} />
                   </View>
                 ) : (
-                  <Image source={mod} style={styles.faceImage} />
+                  <Image source={mod} style={[styles.faceImage, !isBettingOpen && styles.mutedFaceImage]} />
+                )}
+
+                {/* Face Label */}
+                <Text style={[styles.faceLabel, isSelected && styles.selectedFaceLabel]}>
+                  {FACE_NAMES[idx]}
+                </Text>
+
+                {/* Active Selection Underline Glow */}
+                {isSelected && <View style={styles.selectedIndicator} />}
+
+                {/* Placed Bet Badge */}
+                {placedBetAmount > 0 && (
+                  <View style={styles.placedBetBadge}>
+                    <Text style={styles.placedBetText}>₹{placedBetAmount}</Text>
+                  </View>
                 )}
               </View>
             </TouchableOpacity>
@@ -88,56 +181,87 @@ const BettingControlPanel: React.FC = () => {
         })}
       </View>
 
-      {/* 3. Bet Control & Multiplier Row */}
+      {/* 3. Custom Bet Amount Input & Presets Section */}
       <View style={styles.betSection}>
-        <View style={styles.betRow}>
-          {/* Bigger Minus Button */}
+        {/* Row 1: Amount Input Box with - / + Steppers */}
+        <View style={styles.inputRow}>
           <TouchableOpacity
             style={styles.adjustBtn}
-            onPress={() => handleAdjustBet(-50)}
+            onPress={() => handleAdjustBet(-10)}
             activeOpacity={0.8}
           >
             <Text style={styles.adjustBtnText}>−</Text>
           </TouchableOpacity>
 
-          {/* Larger Amount Display Box */}
-          <View style={styles.amountBox}>
-            <Text style={styles.coinIcon}>🪙</Text>
-            <Text style={styles.amountText}>{betAmount}</Text>
-          </View>
+          <Pressable
+            style={[styles.inputBox, isFocused && styles.inputBoxFocused]}
+            onPress={handleFocusInput}
+          >
+            <Text style={styles.currencyPrefix}>₹</Text>
+            <TextInput
+              ref={inputRef}
+              style={styles.textInput}
+              value={inputVal}
+              onChangeText={handleInputChange}
+              onFocus={() => setIsFocused(true)}
+              onBlur={handleInputBlur}
+              onSubmitEditing={handleInputBlur}
+              keyboardType="number-pad"
+              placeholder="1"
+              placeholderTextColor="#64748b"
+              maxLength={8}
+              selectTextOnFocus
+              returnKeyType="done"
+            />
+          </Pressable>
 
-          {/* Bigger Plus Button */}
           <TouchableOpacity
             style={styles.adjustBtn}
-            onPress={() => handleAdjustBet(50)}
+            onPress={() => handleAdjustBet(10)}
             activeOpacity={0.8}
           >
             <Text style={styles.adjustBtnText}>+</Text>
           </TouchableOpacity>
+        </View>
 
-          {/* Quick Increment Pills */}
-          <View style={styles.incrementList}>
-            {BET_INCREMENTS.map((amt) => (
+        {/* Row 2: Preset Chips & MAX Option */}
+        <View style={styles.presetsRow}>
+          {PRESET_AMOUNTS.map((amt) => {
+            const isSelected = betAmount === amt;
+            return (
               <TouchableOpacity
                 key={amt}
-                style={styles.incPill}
-                onPress={() => handleAddPreset(amt)}
+                style={[styles.presetChip, isSelected && styles.presetChipActive]}
+                onPress={() => handleSetPreset(amt)}
                 activeOpacity={0.8}
               >
-                <Text style={styles.incPillText}>+{amt}</Text>
+                <Text
+                  style={[
+                    styles.presetChipText,
+                    isSelected && styles.presetChipTextActive,
+                  ]}
+                >
+                  ₹{amt}
+                </Text>
               </TouchableOpacity>
-            ))}
+            );
+          })}
 
-            <TouchableOpacity
-              style={[styles.incPill, styles.incPillMax]}
-              onPress={handleMaxBet}
-              activeOpacity={0.8}
+          {/* MAX Total Wallet Amount Preset */}
+          <TouchableOpacity
+            style={[styles.presetChip, styles.presetMaxChip, isMaxActive && styles.presetMaxChipActive]}
+            onPress={handleMaxBet}
+            activeOpacity={0.8}
+          >
+            <Text
+              style={[
+                styles.presetMaxText,
+                isMaxActive && styles.presetMaxTextActive,
+              ]}
             >
-              <Text style={[styles.incPillText, styles.incPillMaxText]}>
-                MAX
-              </Text>
-            </TouchableOpacity>
-          </View>
+              MAX
+            </Text>
+          </TouchableOpacity>
         </View>
       </View>
     </View>
@@ -148,40 +272,7 @@ const styles = StyleSheet.create({
   container: {
     paddingHorizontal: 16,
     paddingVertical: 2,
-    gap: 10,
-  },
-  matchesBar: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    backgroundColor: 'rgba(11,15,30,0.85)',
-    borderWidth: 1,
-    borderColor: 'rgba(124,58,237,0.3)',
-    borderRadius: 10,
-    paddingHorizontal: 12,
-    paddingVertical: 4,
-  },
-  matchesLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-  },
-  matchesIcon: {
-    color: '#38bdf8',
-    fontSize: 10,
-  },
-  matchesTitle: {
-    color: '#ffffff',
-    fontSize: 10,
-    fontFamily: 'Outfit_700Bold',
-    fontWeight: '700',
-    letterSpacing: 0.8,
-  },
-  matchesRight: {},
-  matchesLink: {
-    color: 'rgba(148,163,184,0.8)',
-    fontSize: 10,
-    fontFamily: 'Outfit_500Medium',
+    gap: 6,
   },
   selectorHeader: {
     flexDirection: 'row',
@@ -205,105 +296,95 @@ const styles = StyleSheet.create({
   numberGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 6,
+    gap: 4,
     justifyContent: 'space-between',
   },
-  numberCard: {
+  faceTouchable: {
     width: '31%',
-    height: 64,
-    borderRadius: 12,
-    backgroundColor: 'transparent',
-    borderWidth: 0,
-    overflow: 'visible',
-  },
-  numberCardSelectedBorder: {
-    borderColor: '#38bdf8',
-    borderWidth: 1.5,
-    shadowColor: '#38bdf8',
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.8,
-    shadowRadius: 8,
-    elevation: 8,
-  },
-  cardInner: {
-    flex: 1,
+    height: 58,
     alignItems: 'center',
     justifyContent: 'center',
+    backgroundColor: 'transparent',
   },
-  cardGradient: {
-    flex: 1,
+  faceWrapper: {
     alignItems: 'center',
     justifyContent: 'center',
     position: 'relative',
-  },
-  numberText: {
-    color: 'rgba(255,255,255,0.85)',
-    fontSize: 18,
-    fontFamily: 'Outfit_700Bold',
-    fontWeight: '700',
-  },
-  numberTextSelected: {
-    color: '#ffffff',
-    textShadowColor: 'rgba(0,0,0,0.5)',
-    textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 3,
-  },
-  checkBadge: {
-    position: 'absolute',
-    top: 3,
-    right: 4,
-    width: 14,
-    height: 14,
-    borderRadius: 7,
-    backgroundColor: '#38bdf8',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  checkText: {
-    color: '#000000',
-    fontSize: 9,
-    fontFamily: 'Outfit_700Bold',
-    fontWeight: '700',
-  },
-  neonGlowBar: {
-    position: 'absolute',
-    bottom: 0,
-    left: 8,
-    right: 8,
-    height: 2.5,
-    borderRadius: 1.5,
-    backgroundColor: '#38bdf8',
+    width: '100%',
+    height: '100%',
   },
   faceImage: {
-    width: 52,
-    height: 52,
+    width: 44,
+    height: 44,
     backgroundColor: 'transparent',
+    resizeMode: 'contain',
   },
-  selectedInner: {
-    alignItems: 'center',
-    justifyContent: 'center',
+  selectedFaceImage: {
+    transform: [{ scale: 1.1 }],
   },
-  imageWrap: {
-    width: 58,
-    height: 58,
+  mutedFaceImage: {
+    opacity: 0.75,
+  },
+  selectedGlowWrap: {
     alignItems: 'center',
     justifyContent: 'center',
   },
   glowImage: {
     position: 'absolute',
-    width: 62,
-    height: 62,
-    transform: [{ scale: 1.2 }],
+    width: 50,
+    height: 50,
+    transform: [{ scale: 1.25 }],
     tintColor: '#38bdf8',
-    opacity: 0.95,
+    opacity: 0.9,
+  },
+  faceLabel: {
+    color: 'rgba(255,255,255,0.7)',
+    fontSize: 8,
+    fontFamily: 'Outfit_700Bold',
+    letterSpacing: 0.5,
+    marginTop: 1,
+  },
+  selectedFaceLabel: {
+    color: '#38bdf8',
+    fontFamily: 'Outfit_700Bold',
+  },
+  selectedIndicator: {
+    position: 'absolute',
+    bottom: -1,
+    width: 20,
+    height: 2,
+    borderRadius: 1,
+    backgroundColor: '#38bdf8',
+  },
+  placedBetBadge: {
+    position: 'absolute',
+    top: -2,
+    right: 6,
+    backgroundColor: '#22c55e',
+    borderRadius: 8,
+    paddingHorizontal: 5,
+    paddingVertical: 1,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.8,
+    shadowRadius: 2,
+    elevation: 4,
+  },
+  placedBetText: {
+    color: '#000000',
+    fontSize: 8,
+    fontFamily: 'Outfit_700Bold',
+    fontWeight: '800',
   },
   betSection: {
-    marginTop: 14,
+    marginTop: 4,
+    gap: 6,
   },
-  betRow: {
+  inputRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 5,
+    justifyContent: 'center',
+    gap: 8,
   },
   adjustBtn: {
     width: 36,
@@ -326,56 +407,96 @@ const styles = StyleSheet.create({
     fontFamily: 'Outfit_700Bold',
     lineHeight: 22,
   },
-  amountBox: {
+  inputBox: {
+    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: 'rgba(11,15,30,0.95)',
     borderWidth: 1.5,
-    borderColor: 'rgba(124,58,237,0.5)',
+    borderColor: 'rgba(124,58,237,0.6)',
     borderRadius: 10,
-    paddingHorizontal: 8,
-    height: 36,
+    paddingHorizontal: 12,
+    height: 38,
     gap: 4,
   },
-  coinIcon: {
-    fontSize: 13,
+  inputBoxFocused: {
+    borderColor: '#38bdf8',
+    backgroundColor: 'rgba(15,23,42,0.98)',
+    shadowColor: '#38bdf8',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.6,
+    shadowRadius: 8,
   },
-  amountText: {
+  currencyPrefix: {
+    color: '#38bdf8',
+    fontSize: 16,
+    fontFamily: 'Outfit_700Bold',
+    fontWeight: '800',
+  },
+  textInput: {
+    flex: 1,
     color: '#ffffff',
-    fontSize: 14,
+    fontSize: 16,
     fontFamily: 'Outfit_700Bold',
     fontWeight: '700',
+    paddingVertical: 0,
+    height: '100%',
   },
-  incrementList: {
-    flex: 1,
+  presetsRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    gap: 3,
+    gap: 4,
   },
-  incPill: {
+  presetChip: {
+    flex: 1,
     backgroundColor: 'rgba(17,24,39,0.85)',
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.15)',
     borderRadius: 8,
-    height: 32,
-    paddingHorizontal: 4,
+    height: 30,
     alignItems: 'center',
     justifyContent: 'center',
-    flex: 1,
   },
-  incPillText: {
+  presetChipActive: {
+    backgroundColor: 'rgba(56,189,248,0.22)',
+    borderColor: '#38bdf8',
+    shadowColor: '#38bdf8',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.5,
+    shadowRadius: 4,
+  },
+  presetChipText: {
     color: 'rgba(255,255,255,0.9)',
-    fontSize: 10,
+    fontSize: 11,
     fontFamily: 'Outfit_600SemiBold',
   },
-  incPillMax: {
-    backgroundColor: 'rgba(236,72,153,0.25)',
-    borderColor: '#ec4899',
-  },
-  incPillMaxText: {
-    color: '#f472b6',
+  presetChipTextActive: {
+    color: '#38bdf8',
     fontFamily: 'Outfit_700Bold',
+    fontWeight: '700',
+  },
+  presetMaxChip: {
+    backgroundColor: 'rgba(236,72,153,0.15)',
+    borderColor: 'rgba(236,72,153,0.5)',
+  },
+  presetMaxChipActive: {
+    backgroundColor: '#ec4899',
+    borderColor: '#f472b6',
+    shadowColor: '#ec4899',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.8,
+    shadowRadius: 6,
+  },
+  presetMaxText: {
+    color: '#f472b6',
+    fontSize: 11,
+    fontFamily: 'Outfit_700Bold',
+    fontWeight: '800',
+  },
+  presetMaxTextActive: {
+    color: '#ffffff',
+    fontWeight: '900',
   },
 });
 

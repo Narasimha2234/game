@@ -28,9 +28,9 @@ function createDieMesh(): THREE.Group {
   // Rounded-corner dice body using BoxGeometry with bevel-like material
   const geo = new THREE.BoxGeometry(1, 1, 1, 2, 2, 2);
   const mat = new THREE.MeshPhongMaterial({
-    color: 0xf5f0e8,
-    shininess: 80,
-    specular: new THREE.Color(0x888888),
+    color: 0xffffff,
+    shininess: 90,
+    specular: new THREE.Color(0xffffff),
   });
   const cube = new THREE.Mesh(geo, mat);
   group.add(cube);

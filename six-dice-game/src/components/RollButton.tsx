@@ -5,27 +5,73 @@ import {
   Text,
   View,
   Platform,
+  Alert,
 } from 'react-native';
 import * as Haptics from 'expo-haptics';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useGameStore } from '../store/gameStore';
-import { useGameAudio } from '../hooks/useGameAudio';
+import { useAuthStore } from '../store/authStore';
 
 const RollButton: React.FC = () => {
-  const { roll, phase, hapticEnabled } = useGameStore();
-  const { playRoll } = useGameAudio();
+  const {
+    phase,
+    serverPhase,
+    mode,
+    hapticEnabled,
+    placeBet,
+    isPlacingBet,
+    betAmount,
+    selectedNumber,
+  } = useGameStore();
+  const { walletBalance } = useAuthStore();
 
-  const isRolling = phase === 'rolling' || phase === 'landing';
+  const isBettingOpen = serverPhase === 'BETTING_OPEN' && mode !== 'STOPPED';
+  const isRolling = phase === 'rolling' || phase === 'landing' || serverPhase === 'ROLLING';
+  const isDisabled = !isBettingOpen || isRolling || isPlacingBet;
 
-  const handlePress = () => {
-    if (isRolling) return;
+  const handlePress = async () => {
+    if (isDisabled) return;
+
+    if (betAmount < 1) {
+      Alert.alert(
+        'Invalid Bet Amount',
+        'Please enter a bet amount of at least ₹1 coin.',
+      );
+      return;
+    }
+
+    if (walletBalance < betAmount) {
+      Alert.alert(
+        'Insufficient Balance',
+        `You need ₹${betAmount} coins to place this bet. Current balance: ₹${walletBalance}.`,
+      );
+      return;
+    }
 
     if (hapticEnabled && Platform.OS !== 'web') {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     }
-    playRoll();
-    roll();
+
+    try {
+      const success = await placeBet();
+      if (success) {
+        if (hapticEnabled && Platform.OS !== 'web') {
+          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        }
+      }
+    } catch (err: any) {
+      Alert.alert(
+        'Bet Failed',
+        err?.response?.data?.message || err?.message || 'Could not place bet.',
+      );
+    }
   };
+
+  let buttonText = 'PLACE BET';
+  if (isPlacingBet) buttonText = 'CONFIRMING BET...';
+  else if (isRolling) buttonText = 'ROLLING...';
+  else if (mode === 'STOPPED') buttonText = 'GAME PAUSED';
+  else if (serverPhase !== 'BETTING_OPEN') buttonText = 'BETTING CLOSED';
 
   return (
     <View style={styles.wrapper}>
@@ -34,13 +80,13 @@ const RollButton: React.FC = () => {
           onPress={handlePress}
           style={({ pressed }) => [
             styles.pressable,
-            pressed && !isRolling && styles.pressed,
+            pressed && !isDisabled && styles.pressed,
           ]}
-          disabled={isRolling}
+          disabled={isDisabled}
         >
           <LinearGradient
             colors={
-              isRolling
+              isDisabled
                 ? ['#475569', '#334155', '#1e293b']
                 : ['#c084fc', '#9333ea', '#6d28d9']
             }
@@ -51,8 +97,8 @@ const RollButton: React.FC = () => {
             {/* Top highlight line for 3D metallic sheen effect */}
             <View style={styles.topSheen} />
 
-            <Text style={[styles.label, isRolling && styles.labelDisabled]}>
-              {isRolling ? 'ROLLING...' : 'PLACE BET'}
+            <Text style={[styles.label, isDisabled && styles.labelDisabled]}>
+              {buttonText}
             </Text>
           </LinearGradient>
         </Pressable>
