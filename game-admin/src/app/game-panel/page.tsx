@@ -1,118 +1,147 @@
 "use client";
 
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "../../context/AuthContext";
+import api from "@/lib/axios";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Switch } from "@/components/ui/switch";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Gamepad2,
-  Dice1,
-  Dice2,
-  Dice3,
-  Dice4,
-  Dice5,
-  Dice6,
   Play,
   RotateCcw,
   Sparkles,
-  ShieldCheck,
   Users,
-  TrendingUp,
-  AlertTriangle,
-  Flame,
   Clock,
   ArrowLeft,
-  Volume2,
-  VolumeX,
-  Lock,
-  Unlock,
   CheckCircle,
-  Eye,
   Sliders,
   Trophy,
+  Zap,
+  Pause,
+  RefreshCw,
+  Eye,
+  TrendingUp,
+  AlertCircle,
+  ChevronLeft,
+  ChevronRight,
+  Shuffle,
+  Check,
+  Flame,
+  Star,
 } from "lucide-react";
 
 // Dice Face Definitions corresponding to six-dice-game
 export const DICE_FACES = [
-  { id: 1, name: "Bat", symbol: "🦇", color: "from-purple-600 to-indigo-700", border: "border-purple-500", text: "text-purple-400", bg: "bg-purple-500/10" },
-  { id: 2, name: "Diamond", symbol: "💎", color: "from-cyan-500 to-blue-600", border: "border-cyan-500", text: "text-cyan-400", bg: "bg-cyan-500/10" },
-  { id: 3, name: "Heart", symbol: "❤️", color: "from-rose-500 to-red-600", border: "border-rose-500", text: "text-rose-400", bg: "bg-rose-500/10" },
-  { id: 4, name: "Leaf", symbol: "🍀", color: "from-emerald-500 to-green-600", border: "border-emerald-500", text: "text-emerald-400", bg: "bg-emerald-500/10" },
-  { id: 5, name: "Tree", symbol: "🌲", color: "from-amber-500 to-yellow-600", border: "border-amber-500", text: "text-amber-400", bg: "bg-amber-500/10" },
-  { id: 6, name: "Crown", symbol: "👑", color: "from-yellow-400 to-orange-500", border: "border-yellow-400", text: "text-yellow-400", bg: "bg-yellow-500/10" },
+  {
+    id: 1,
+    name: "Bat",
+    symbol: "🦇",
+    image: "/dice-faces/bat.png",
+    border: "border-purple-300 hover:border-purple-500",
+    activeBorder: "border-purple-600 ring-2 ring-purple-200",
+    text: "text-purple-700",
+    bg: "bg-purple-50",
+    badge: "bg-purple-100 text-purple-800",
+  },
+  {
+    id: 2,
+    name: "Diamond",
+    symbol: "💎",
+    image: "/dice-faces/diamond.png",
+    border: "border-cyan-300 hover:border-cyan-500",
+    activeBorder: "border-cyan-600 ring-2 ring-cyan-200",
+    text: "text-cyan-700",
+    bg: "bg-cyan-50",
+    badge: "bg-cyan-100 text-cyan-800",
+  },
+  {
+    id: 3,
+    name: "Heart",
+    symbol: "❤️",
+    image: "/dice-faces/heart.png",
+    border: "border-rose-300 hover:border-rose-500",
+    activeBorder: "border-rose-600 ring-2 ring-rose-200",
+    text: "text-rose-700",
+    bg: "bg-rose-50",
+    badge: "bg-rose-100 text-rose-800",
+  },
+  {
+    id: 4,
+    name: "Leaf",
+    symbol: "🍀",
+    image: "/dice-faces/leaf.png",
+    border: "border-emerald-300 hover:border-emerald-500",
+    activeBorder: "border-emerald-600 ring-2 ring-emerald-200",
+    text: "text-emerald-700",
+    bg: "bg-emerald-50",
+    badge: "bg-emerald-100 text-emerald-800",
+  },
+  {
+    id: 5,
+    name: "Tree",
+    symbol: "🌲",
+    image: "/dice-faces/tree.png",
+    border: "border-amber-300 hover:border-amber-500",
+    activeBorder: "border-amber-600 ring-2 ring-amber-200",
+    text: "text-amber-700",
+    bg: "bg-amber-50",
+    badge: "bg-amber-100 text-amber-800",
+  },
+  {
+    id: 6,
+    name: "Crown",
+    symbol: "👑",
+    image: "/dice-faces/crown.png",
+    border: "border-yellow-300 hover:border-yellow-500",
+    activeBorder: "border-yellow-600 ring-2 ring-yellow-200",
+    text: "text-yellow-700",
+    bg: "bg-yellow-50",
+    badge: "bg-yellow-100 text-yellow-800",
+  },
 ];
-
-interface BetPoolItem {
-  faceId: number;
-  totalAmount: number;
-  bettorsCount: number;
-}
-
-interface SimulatedBet {
-  id: string;
-  playerName: string;
-  faceId: number;
-  amount: number;
-  time: string;
-}
 
 interface RoundHistory {
   roundNumber: number;
-  dice: number[];
-  pattern: string;
-  totalBets: number;
-  houseProfit: number;
-  timestamp: string;
+  diceResults: number[];
+  phase: string;
+  totalBetsAmount: number;
+  totalPayoutAmount: number;
+  createdAt: string;
 }
 
 export default function GamePanelPage() {
-  const { user, logout, isAuthenticated, loading } = useAuth();
+  const { user, isAuthenticated, loading } = useAuth();
   const router = useRouter();
 
-  // Game state
-  const [roundNumber, setRoundNumber] = useState(1048);
-  const [gamePhase, setGamePhase] = useState<"BETTING_OPEN" | "BETS_LOCKED" | "ROLLING" | "ROUND_RESOLVED">("BETTING_OPEN");
-  const [timerSeconds, setTimerSeconds] = useState(15);
-  const [isTimerPaused, setIsTimerPaused] = useState(false);
-  const [soundEnabled, setSoundEnabled] = useState(true);
+  // Live Game state from backend
+  const [roundNumber, setRoundNumber] = useState(1001);
+  const [gamePhase, setGamePhase] = useState<"BETTING_OPEN" | "ROLLING" | "SETTLED">("BETTING_OPEN");
+  const [gameMode, setGameMode] = useState<"AUTOMATIC" | "MANUAL" | "STOPPED">("AUTOMATIC");
+  const [timeLeft, setTimeLeft] = useState(30);
+  const [betTimeSeconds, setBetTimeSeconds] = useState(30);
+  const [rollTimeSeconds, setRollTimeSeconds] = useState(8);
+  const [intervalTimeSeconds, setIntervalTimeSeconds] = useState(10);
 
-  // 6 Current Dice Values (1 to 6)
+  // Staged Manual Dice (1 to 6)
   const [dice, setDice] = useState<number[]>([1, 2, 3, 4, 5, 6]);
-  const [isRolling, setIsRolling] = useState(false);
-  const [activeDieIndexToEdit, setActiveDieIndexToEdit] = useState<number | null>(null);
+  const [activeSlot, setActiveSlot] = useState<number>(0); // 0 to 5
+  const [serverPresetDice, setServerPresetDice] = useState<number[] | null>(null);
+  const [actionLoading, setActionLoading] = useState(false);
 
-  // Mode: Manual or Auto-Dealer
-  const [autoRollEnabled, setAutoRollEnabled] = useState(false);
+  // Real Bet Pools from backend
+  const [betPools, setBetPools] = useState<{ [faceId: number]: { totalAmount: number; bettorsCount: number } }>({
+    1: { totalAmount: 0, bettorsCount: 0 },
+    2: { totalAmount: 0, bettorsCount: 0 },
+    3: { totalAmount: 0, bettorsCount: 0 },
+    4: { totalAmount: 0, bettorsCount: 0 },
+    5: { totalAmount: 0, bettorsCount: 0 },
+    6: { totalAmount: 0, bettorsCount: 0 },
+  });
 
-  // Simulated Pool Bets across 6 faces
-  const [betPools, setBetPools] = useState<BetPoolItem[]>([
-    { faceId: 1, totalAmount: 4500, bettorsCount: 6 },
-    { faceId: 2, totalAmount: 8200, bettorsCount: 11 },
-    { faceId: 3, totalAmount: 14500, bettorsCount: 19 },
-    { faceId: 4, totalAmount: 3200, bettorsCount: 4 },
-    { faceId: 5, totalAmount: 6100, bettorsCount: 8 },
-    { faceId: 6, totalAmount: 11800, bettorsCount: 15 },
-  ]);
-
-  // Live Simulated Player Bets Feed
-  const [liveBetsFeed, setLiveBetsFeed] = useState<SimulatedBet[]>([
-    { id: "1", playerName: "Alex Kumar", faceId: 3, amount: 1000, time: "Just now" },
-    { id: "2", playerName: "Rohan V.", faceId: 6, amount: 2500, time: "10s ago" },
-    { id: "3", playerName: "Suresh P.", faceId: 2, amount: 500, time: "18s ago" },
-    { id: "4", playerName: "Vikram S.", faceId: 3, amount: 2000, time: "25s ago" },
-  ]);
-
-  // History of rounds
-  const [history, setHistory] = useState<RoundHistory[]>([
-    { roundNumber: 1047, dice: [3, 3, 3, 1, 6, 2], pattern: "Three of a Kind", totalBets: 42000, houseProfit: 8400, timestamp: "2m ago" },
-    { roundNumber: 1046, dice: [2, 2, 5, 5, 1, 4], pattern: "Two Pairs", totalBets: 38500, houseProfit: 12100, timestamp: "4m ago" },
-    { roundNumber: 1045, dice: [6, 6, 6, 6, 2, 3], pattern: "Four of a Kind!", totalBets: 51200, houseProfit: -6400, timestamp: "6m ago" },
-  ]);
-
-  const timerRef = useRef<NodeJS.Timeout | null>(null);
+  // History of rounds from backend
+  const [history, setHistory] = useState<RoundHistory[]>([]);
 
   useEffect(() => {
     if (!loading && !isAuthenticated) {
@@ -120,683 +149,956 @@ export default function GamePanelPage() {
     }
   }, [loading, isAuthenticated, router]);
 
-  // Timer Countdown Effect
+  // Sync with live server state every 1 second
   useEffect(() => {
-    if (isTimerPaused || gamePhase !== "BETTING_OPEN") {
-      if (timerRef.current) clearInterval(timerRef.current);
-      return;
+    const fetchState = async () => {
+      try {
+        const res = await api.get("/api/game/state");
+        if (res.data?.success && res.data.data) {
+          const d = res.data.data;
+          setRoundNumber(d.roundNumber);
+          setGamePhase(d.phase);
+          setGameMode(d.mode);
+          setTimeLeft(d.timeLeft);
+          setBetTimeSeconds(d.betTimeSeconds || 30);
+          setRollTimeSeconds(d.rollTimeSeconds || 8);
+          setIntervalTimeSeconds(d.intervalTimeSeconds || 10);
+          setServerPresetDice(d.presetDice || null);
+
+          // If round is currently rolling or settled, show the live outcome dice
+          if (d.phase === "ROLLING" || d.phase === "SETTLED") {
+            if (Array.isArray(d.diceResults)) {
+              setDice(d.diceResults.map((v: any) => Number(v)));
+            }
+          } else if (d.presetDice && Array.isArray(d.presetDice) && d.presetDice.length === 6) {
+            setDice(d.presetDice.map((v: any) => Number(v)));
+          }
+
+          if (d.betPools) {
+            setBetPools(d.betPools);
+          }
+          if (Array.isArray(d.recentHistory)) {
+            setHistory(d.recentHistory);
+          }
+        }
+      } catch (err) {
+        console.error("Failed to fetch live game state:", err);
+      }
+    };
+
+    fetchState();
+    const interval = setInterval(fetchState, 1000);
+    return () => clearInterval(interval);
+  }, []);
+
+  // Admin Control Handlers
+  const handleSetMode = async (mode: "AUTOMATIC" | "MANUAL" | "STOPPED") => {
+    setActionLoading(true);
+    try {
+      await api.post("/api/game/control", {
+        mode,
+        action: mode === "STOPPED" ? "stop" : "start",
+      });
+      setGameMode(mode);
+    } catch (err: any) {
+      alert(err.response?.data?.message || "Failed to update game mode");
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleUpdateTimers = async (betTime: number, rollTime: number, intervalTime: number) => {
+    setActionLoading(true);
+    try {
+      await api.post("/api/game/control", {
+        betTimeSeconds: betTime,
+        rollTimeSeconds: rollTime,
+        intervalTimeSeconds: intervalTime,
+      });
+      setBetTimeSeconds(betTime);
+      setRollTimeSeconds(rollTime);
+      setIntervalTimeSeconds(intervalTime);
+    } catch (err: any) {
+      alert(err.response?.data?.message || "Failed to update timers");
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleTriggerAction = async (action: "roll_now" | "next_round" | "start" | "stop") => {
+    setActionLoading(true);
+    try {
+      await api.post("/api/game/control", { action });
+    } catch (err: any) {
+      alert(err.response?.data?.message || "Failed to execute action");
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  // 1. Assign face to active slot and auto-advance to next slot
+  const handlePickFaceForActiveSlot = async (faceId: number) => {
+    const updated = [...dice];
+    updated[activeSlot] = faceId;
+    setDice(updated);
+
+    // Auto-advance to next slot for rapid sequential entry (0 -> 1 -> 2 -> 3 -> 4 -> 5 -> 0)
+    setActiveSlot((prev) => (prev + 1) % 6);
+
+    try {
+      await api.post("/api/game/control", { manualDice: updated });
+      setServerPresetDice(updated);
+    } catch (err: any) {
+      console.error("Failed to set manual dice:", err);
+    }
+  };
+
+  // 2. Set single die directly
+  const handleSetDirectSlot = async (slotIdx: number, faceId: number) => {
+    const updated = [...dice];
+    updated[slotIdx] = faceId;
+    setDice(updated);
+    setActiveSlot(slotIdx);
+
+    try {
+      await api.post("/api/game/control", { manualDice: updated });
+      setServerPresetDice(updated);
+    } catch (err: any) {
+      console.error("Failed to set manual dice:", err);
+    }
+  };
+
+  // 3. Set All 6 Dice to one face
+  const handleSetAllToFace = async (faceId: number) => {
+    const outcome = [faceId, faceId, faceId, faceId, faceId, faceId];
+    setDice(outcome);
+    try {
+      await api.post("/api/game/control", { manualDice: outcome });
+      setServerPresetDice(outcome);
+    } catch (err: any) {
+      console.error("Failed to set dice to face:", err);
+    }
+  };
+
+  // 4. Comprehensive Smart Presets
+  const applyPreset = async (
+    presetType:
+      | "all_bats"
+      | "all_diamonds"
+      | "all_hearts"
+      | "all_leaves"
+      | "all_trees"
+      | "all_crowns"
+      | "straight"
+      | "five_kind"
+      | "four_kind"
+      | "full_house"
+      | "lowest_pool"
+      | "lowest_split"
+      | "highest_pool"
+      | "random"
+  ) => {
+    let outcome = [1, 2, 3, 4, 5, 6];
+
+    // Face sorting by pool amount
+    const sortedPools = DICE_FACES.map((f) => ({
+      id: f.id,
+      amount: betPools[f.id]?.totalAmount || 0,
+    })).sort((a, b) => a.amount - b.amount);
+
+    const lowestFace = sortedPools[0]?.id || 1;
+    const secondLowestFace = sortedPools[1]?.id || 2;
+    const highestFace = sortedPools[sortedPools.length - 1]?.id || 6;
+
+    switch (presetType) {
+      case "all_bats":
+        outcome = [1, 1, 1, 1, 1, 1];
+        break;
+      case "all_diamonds":
+        outcome = [2, 2, 2, 2, 2, 2];
+        break;
+      case "all_hearts":
+        outcome = [3, 3, 3, 3, 3, 3];
+        break;
+      case "all_leaves":
+        outcome = [4, 4, 4, 4, 4, 4];
+        break;
+      case "all_trees":
+        outcome = [5, 5, 5, 5, 5, 5];
+        break;
+      case "all_crowns":
+        outcome = [6, 6, 6, 6, 6, 6];
+        break;
+      case "lowest_pool":
+        outcome = [lowestFace, lowestFace, lowestFace, lowestFace, lowestFace, lowestFace];
+        break;
+      case "lowest_split":
+        outcome = [lowestFace, lowestFace, lowestFace, secondLowestFace, secondLowestFace, secondLowestFace];
+        break;
+      case "highest_pool":
+        outcome = [highestFace, highestFace, highestFace, highestFace, highestFace, highestFace];
+        break;
+      case "straight":
+        outcome = [1, 2, 3, 4, 5, 6];
+        break;
+      case "five_kind":
+        outcome = [6, 6, 6, 6, 6, 1];
+        break;
+      case "four_kind":
+        outcome = [3, 3, 3, 3, 2, 2];
+        break;
+      case "full_house":
+        outcome = [4, 4, 4, 5, 5, 5];
+        break;
+      case "random":
+        outcome = Array.from({ length: 6 }, () => Math.floor(Math.random() * 6) + 1);
+        break;
     }
 
-    timerRef.current = setInterval(() => {
-      setTimerSeconds((prev) => {
-        if (prev <= 1) {
-          // Lock bets and roll automatically if auto mode is active
-          setGamePhase("BETS_LOCKED");
-          if (autoRollEnabled) {
-            setTimeout(() => triggerRollDice(), 800);
-          }
-          return 0;
-        }
-        return prev - 1;
-      });
-    }, 1000);
-
-    return () => {
-      if (timerRef.current) clearInterval(timerRef.current);
-    };
-  }, [isTimerPaused, gamePhase, autoRollEnabled]);
+    setDice(outcome);
+    try {
+      await api.post("/api/game/control", { manualDice: outcome });
+      setServerPresetDice(outcome);
+    } catch (err: any) {
+      console.error("Failed to send preset:", err);
+    }
+  };
 
   // Pattern recognition helper
   const getPatternName = (diceValues: number[]) => {
+    if (!diceValues || diceValues.length === 0) return "Awaiting Roll";
     const freq: Record<number, number> = {};
     diceValues.forEach((d) => (freq[d] = (freq[d] || 0) + 1));
     const maxFreq = Math.max(...Object.values(freq));
     const sorted = [...diceValues].sort((a, b) => a - b);
     const isStraight = sorted.every((val, i) => i === 0 || val === sorted[i - 1] + 1);
 
-    if (maxFreq === 6) return "🎰 HEXTUPLES! (6x)";
-    if (maxFreq === 5) return "⭐ Five of a Kind! (5x)";
-    if (maxFreq === 4) return "🔥 Four of a Kind! (4x)";
-    if (isStraight) return "⚡ Straight (1-6)!";
+    if (maxFreq === 6) return "🎰 Hextuples (6 of a kind)";
+    if (maxFreq === 5) return "⭐ Five of a Kind (5x)";
+    if (maxFreq === 4) return "🔥 Four of a Kind (4x)";
+    if (isStraight) return "⚡ Straight (1-6)";
     if (maxFreq === 3) return "✨ Three of a Kind (3x)";
     if (Object.values(freq).filter((f) => f === 2).length === 2) return "Two Pairs";
     if (maxFreq === 2) return "One Pair";
-    return "High Roll";
-  };
-
-  // Roll Dice Trigger with Animated Physics Shuffle
-  const triggerRollDice = (customOutcome?: number[]) => {
-    if (isRolling) return;
-    setIsRolling(true);
-    setGamePhase("ROLLING");
-
-    let rollsCount = 0;
-    const interval = setInterval(() => {
-      setDice(Array.from({ length: 6 }, () => Math.floor(Math.random() * 6) + 1));
-      rollsCount++;
-
-      if (rollsCount > 12) {
-        clearInterval(interval);
-        // Final outcome
-        const finalDice = customOutcome || Array.from({ length: 6 }, () => Math.floor(Math.random() * 6) + 1);
-        setDice(finalDice);
-        setIsRolling(false);
-        setGamePhase("ROUND_RESOLVED");
-
-        // Calculate Round Metrics
-        const pattern = getPatternName(finalDice);
-        const totalPool = betPools.reduce((sum, b) => sum + b.totalAmount, 0);
-
-        // Calculate Payouts
-        const freqMap: Record<number, number> = {};
-        finalDice.forEach((d) => (freqMap[d] = (freqMap[d] || 0) + 1));
-
-        let totalPayout = 0;
-        betPools.forEach((pool) => {
-          const matchCount = freqMap[pool.faceId] || 0;
-          if (matchCount > 0) {
-            // Payout = bet * (matchCount + 1)
-            totalPayout += pool.totalAmount * (matchCount + 1);
-          }
-        });
-
-        const houseProfit = totalPool - totalPayout;
-
-        // Record history
-        setHistory((prev) => [
-          {
-            roundNumber,
-            dice: finalDice,
-            pattern,
-            totalBets: totalPool,
-            houseProfit,
-            timestamp: "Just now",
-          },
-          ...prev.slice(0, 9),
-        ]);
-      }
-    }, 90);
-  };
-
-  // Manual Dice Manipulation (Set specific die value)
-  const handleSetDieValue = (dieIndex: number, faceId: number) => {
-    const updated = [...dice];
-    updated[dieIndex] = faceId;
-    setDice(updated);
-    setActiveDieIndexToEdit(null);
-  };
-
-  // Quick Preset Outcomes
-  const applyPreset = (presetType: "all_hearts" | "all_bats" | "all_crowns" | "straight" | "random") => {
-    let outcome = [1, 2, 3, 4, 5, 6];
-    if (presetType === "all_hearts") outcome = [3, 3, 3, 3, 3, 3];
-    if (presetType === "all_bats") outcome = [1, 1, 1, 1, 1, 1];
-    if (presetType === "all_crowns") outcome = [6, 6, 6, 6, 6, 6];
-    if (presetType === "straight") outcome = [1, 2, 3, 4, 5, 6];
-    if (presetType === "random") outcome = Array.from({ length: 6 }, () => Math.floor(Math.random() * 6) + 1);
-
-    setDice(outcome);
-  };
-
-  // Reset to New Round
-  const startNewRound = () => {
-    setRoundNumber((r) => r + 1);
-    setGamePhase("BETTING_OPEN");
-    setTimerSeconds(15);
-    setIsTimerPaused(false);
-    // Generate new simulated pool
-    setBetPools(
-      DICE_FACES.map((f) => ({
-        faceId: f.id,
-        totalAmount: Math.floor(Math.random() * 80 + 20) * 100,
-        bettorsCount: Math.floor(Math.random() * 15 + 3),
-      }))
-    );
+    return "Mixed Roll";
   };
 
   // Metrics
-  const totalBetPool = betPools.reduce((sum, b) => sum + b.totalAmount, 0);
-  const totalBettors = betPools.reduce((sum, b) => sum + b.bettorsCount, 0);
+  const totalBetPool = Object.values(betPools).reduce((sum, b) => sum + (b?.totalAmount || 0), 0);
+  const totalBettors = Object.values(betPools).reduce((sum, b) => sum + (b?.bettorsCount || 0), 0);
+  const isRolling = gamePhase === "ROLLING";
 
-  // Calculate face frequency on current dice
-  const faceCounts: Record<number, number> = {};
-  dice.forEach((d) => (faceCounts[d] = (faceCounts[d] || 0) + 1));
-
-  const currentPattern = getPatternName(dice);
+  // Min and Max pools calculation for visual badges
+  const poolAmounts = Object.values(betPools).map((b) => b.totalAmount || 0);
+  const maxPoolAmount = Math.max(...poolAmounts, 0);
 
   return (
-    <main className="min-h-screen bg-[#090d16] text-slate-100 flex flex-col font-sans">
-      {/* Top Navigation Bar */}
-      <header className="border-b border-slate-800/80 bg-[#0c1222]/90 backdrop-blur sticky top-0 z-40">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => router.push("/dashboard")}
-              className="text-slate-400 hover:text-white hover:bg-slate-800 gap-1.5 text-xs"
-            >
-              <ArrowLeft className="w-4 h-4" />
-              Players Dashboard
-            </Button>
-            <div className="h-4 w-px bg-slate-700" />
-            <div className="flex items-center gap-2">
-              <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-amber-500 to-rose-600 flex items-center justify-center shadow-lg shadow-rose-900/30">
-                <Gamepad2 className="w-4 h-4 text-white" />
-              </div>
-              <div>
-                <h1 className="text-sm font-bold tracking-tight text-white flex items-center gap-2">
-                  Six Dice Game Control Room
-                  <Badge variant="outline" className="bg-emerald-500/10 text-emerald-400 border-emerald-500/30 text-[10px] py-0">
-                    LIVE
-                  </Badge>
-                </h1>
-                <p className="text-[11px] text-slate-400 font-mono">Round #{roundNumber}</p>
-              </div>
+    <div className="min-h-screen bg-[#f8fafc] text-slate-900 flex flex-col font-sans selection:bg-indigo-600 selection:text-white">
+      {/* Top Clean Navigation Bar */}
+      <header className="sticky top-0 z-40 bg-white border-b border-slate-200 px-6 py-3.5 flex items-center justify-between shadow-xs">
+        <div className="flex items-center gap-4">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => router.push("/dashboard")}
+            className="text-slate-600 hover:text-slate-900 hover:bg-slate-100 transition-colors gap-1.5 border-slate-300 font-medium text-xs"
+          >
+            <ArrowLeft className="w-4 h-4" />
+            Back to Dashboard
+          </Button>
+          <div className="h-4 w-[1px] bg-slate-300" />
+          <div className="flex items-center gap-2.5">
+            <div className="p-2 rounded-xl bg-indigo-600 text-white shadow-xs">
+              <Gamepad2 className="w-5 h-5" />
+            </div>
+            <div>
+              <h1 className="text-base font-bold text-slate-900 flex items-center gap-2">
+                6-Dice Live Game Control Room
+                <Badge className={`border text-xs px-2.5 py-0.5 font-bold ${
+                  gameMode === "AUTOMATIC"
+                    ? "bg-emerald-100 border-emerald-300 text-emerald-800"
+                    : gameMode === "MANUAL"
+                    ? "bg-amber-100 border-amber-300 text-amber-800"
+                    : "bg-rose-100 border-rose-300 text-rose-800"
+                }`}>
+                  <span className="w-1.5 h-1.5 rounded-full mr-1.5 animate-pulse bg-current" />
+                  {gameMode} MODE
+                </Badge>
+              </h1>
+              <p className="text-xs text-slate-500">
+                {gameMode === "MANUAL"
+                  ? "Manual Mode Active: Admin controls dice outcomes or falls back to automatic"
+                  : "Automatic Mode Active: Continuous randomized rounds with auto-settlement"}
+              </p>
             </div>
           </div>
+        </div>
 
-          <div className="flex items-center gap-4">
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => setSoundEnabled(!soundEnabled)}
-              className="text-slate-400 hover:text-white p-1.5 h-8 w-8"
-              title={soundEnabled ? "Mute Sound" : "Enable Sound"}
-            >
-              {soundEnabled ? <Volume2 className="w-4 h-4" /> : <VolumeX className="w-4 h-4" />}
-            </Button>
-
-            <div className="hidden sm:flex items-center gap-2 px-3 py-1 rounded-full bg-slate-800/70 text-xs">
-              <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
-              <span className="text-slate-400">Dealer / Admin:</span>
-              <span className="font-semibold text-white">{user?.name || "Admin"}</span>
+        {/* Top Right Live Status Indicators */}
+        <div className="flex items-center gap-3">
+          <div className="bg-slate-50 border border-slate-200 rounded-xl px-4 py-1.5 flex items-center gap-4">
+            <div>
+              <div className="text-[10px] uppercase font-bold tracking-wider text-slate-500">ACTIVE ROUND</div>
+              <div className="text-sm font-extrabold text-indigo-700 font-mono">#{roundNumber}</div>
             </div>
-
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => logout()}
-              className="text-red-400 hover:text-red-300 hover:bg-red-500/10 border-red-500/20 text-xs h-8"
-            >
-              Logout
-            </Button>
+            <div className="h-6 w-[1px] bg-slate-300" />
+            <div>
+              <div className="text-[10px] uppercase font-bold tracking-wider text-slate-500">PHASE</div>
+              <div className="text-xs font-bold text-slate-800 uppercase">{gamePhase.replace("_", " ")}</div>
+            </div>
           </div>
         </div>
       </header>
 
-      {/* Control Room Viewport */}
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 w-full flex-1 space-y-6">
-        {/* Live Status Banner */}
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-          {/* Round & Phase Card */}
-          <Card className="bg-[#11182c] border-slate-800 text-slate-100 shadow-md">
-            <CardHeader className="pb-1 pt-4 px-4">
-              <CardDescription className="text-slate-400 text-xs flex items-center justify-between">
-                <span>ROUND STATUS</span>
-                <span className="font-mono text-emerald-400">#{roundNumber}</span>
-              </CardDescription>
-              <CardTitle className="text-lg font-bold">
-                {gamePhase === "BETTING_OPEN" && (
-                  <span className="text-emerald-400 flex items-center gap-1.5">
-                    <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
-                    OPEN FOR BETS
-                  </span>
-                )}
-                {gamePhase === "BETS_LOCKED" && (
-                  <span className="text-amber-400 flex items-center gap-1.5">
-                    <Lock className="w-4 h-4" />
-                    BETS LOCKED
-                  </span>
-                )}
-                {gamePhase === "ROLLING" && (
-                  <span className="text-sky-400 flex items-center gap-1.5 animate-pulse">
-                    <Sparkles className="w-4 h-4 animate-spin" />
-                    DICE ROLLING...
-                  </span>
-                )}
-                {gamePhase === "ROUND_RESOLVED" && (
-                  <span className="text-indigo-400 flex items-center gap-1.5">
-                    <CheckCircle className="w-4 h-4" />
-                    RESOLVED
-                  </span>
-                )}
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="px-4 pb-4 pt-1">
-              <div className="flex items-center justify-between text-xs text-slate-400">
-                <span>Phase:</span>
-                <Badge variant="secondary" className="bg-slate-800 text-slate-300 font-mono text-[10px]">
-                  {gamePhase}
-                </Badge>
+      {/* Main Dashboard Workspace (Responsive 2-Column Layout) */}
+      <main className="flex-1 max-w-[1700px] w-full mx-auto p-4 sm:p-6 grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+        {/* LEFT COLUMN (8 Cols): Mode Controls, Betting Pools & Fast Dice Builder */}
+        <div className="lg:col-span-8 flex flex-col gap-6 w-full">
+          {/* 1. Mode Selector & Timer Configuration Card */}
+          <Card className="bg-white border border-slate-200 shadow-xs rounded-2xl overflow-hidden">
+            <CardHeader className="p-4 pb-3 border-b border-slate-100 bg-slate-50/50 flex flex-row items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Sliders className="w-4 h-4 text-indigo-600" />
+                <CardTitle className="text-sm font-bold text-slate-800 uppercase tracking-wider">
+                  Game Mode & Round Timing Controls
+                </CardTitle>
               </div>
-            </CardContent>
-          </Card>
-
-          {/* Countdown Timer Card */}
-          <Card className="bg-[#11182c] border-slate-800 text-slate-100 shadow-md">
-            <CardHeader className="pb-1 pt-4 px-4">
-              <CardDescription className="text-slate-400 text-xs flex items-center justify-between">
-                <span>COUNTDOWN TIMER</span>
-                <Clock className="w-3.5 h-3.5 text-amber-400" />
-              </CardDescription>
-              <CardTitle className="text-2xl font-mono font-extrabold flex items-baseline gap-1">
-                <span className={timerSeconds <= 5 && gamePhase === "BETTING_OPEN" ? "text-red-400 animate-pulse" : "text-amber-400"}>
-                  {timerSeconds}s
-                </span>
-                <span className="text-xs font-normal text-slate-400">
-                  {gamePhase === "BETTING_OPEN" ? "remaining" : "phase locked"}
-                </span>
-              </CardTitle>
+              <Badge variant="outline" className="text-xs border-indigo-200 text-indigo-700 bg-indigo-50 font-medium">
+                Authoritative Server
+              </Badge>
             </CardHeader>
-            <CardContent className="px-4 pb-4 pt-1">
-              <div className="flex items-center justify-between gap-2">
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() => setIsTimerPaused(!isTimerPaused)}
-                  className="h-7 text-xs border-slate-700 bg-slate-800/60 hover:bg-slate-700 text-slate-200"
-                >
-                  {isTimerPaused ? "Resume Timer" : "Pause Timer"}
-                </Button>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() => setTimerSeconds(15)}
-                  className="h-7 text-xs border-slate-700 bg-slate-800/60 hover:bg-slate-700 text-slate-200"
-                >
-                  Reset 15s
-                </Button>
+            <CardContent className="p-4 grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+              {/* Mode Buttons */}
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-slate-600 uppercase tracking-wider">Engine Mode</label>
+                <div className="grid grid-cols-3 gap-1.5">
+                  <Button
+                    size="sm"
+                    onClick={() => handleSetMode("AUTOMATIC")}
+                    className={`text-xs font-bold transition-all h-9 ${
+                      gameMode === "AUTOMATIC"
+                        ? "bg-emerald-600 hover:bg-emerald-700 text-white shadow-xs"
+                        : "bg-white hover:bg-slate-100 text-slate-700 border border-slate-300"
+                    }`}
+                  >
+                    <Zap className="w-3.5 h-3.5 mr-1" />
+                    Auto
+                  </Button>
+                  <Button
+                    size="sm"
+                    onClick={() => handleSetMode("MANUAL")}
+                    className={`text-xs font-bold transition-all h-9 ${
+                      gameMode === "MANUAL"
+                        ? "bg-amber-500 hover:bg-amber-600 text-white shadow-xs"
+                        : "bg-white hover:bg-slate-100 text-slate-700 border border-slate-300"
+                    }`}
+                  >
+                    <Sliders className="w-3.5 h-3.5 mr-1" />
+                    Manual
+                  </Button>
+                  <Button
+                    size="sm"
+                    onClick={() => handleSetMode("STOPPED")}
+                    className={`text-xs font-bold transition-all h-9 ${
+                      gameMode === "STOPPED"
+                        ? "bg-rose-600 hover:bg-rose-700 text-white shadow-xs"
+                        : "bg-white hover:bg-slate-100 text-slate-700 border border-slate-300"
+                    }`}
+                  >
+                    <Pause className="w-3.5 h-3.5 mr-1" />
+                    Stop
+                  </Button>
+                </div>
               </div>
-            </CardContent>
-          </Card>
 
-          {/* Total Stakes Pool */}
-          <Card className="bg-[#11182c] border-slate-800 text-slate-100 shadow-md">
-            <CardHeader className="pb-1 pt-4 px-4">
-              <CardDescription className="text-slate-400 text-xs flex items-center justify-between">
-                <span>TOTAL ROUND POOL</span>
-                <TrendingUp className="w-3.5 h-3.5 text-emerald-400" />
-              </CardDescription>
-              <CardTitle className="text-2xl font-bold font-mono text-emerald-400">
-                ₹{totalBetPool.toLocaleString("en-IN")}
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="px-4 pb-4 pt-1">
-              <div className="flex items-center justify-between text-xs text-slate-400">
-                <span>Active Bettors:</span>
-                <span className="font-semibold text-white">{totalBettors} players</span>
-              </div>
-            </CardContent>
-          </Card>
-
-          {/* Pattern Recognition Card */}
-          <Card className="bg-[#11182c] border-slate-800 text-slate-100 shadow-md">
-            <CardHeader className="pb-1 pt-4 px-4">
-              <CardDescription className="text-slate-400 text-xs flex items-center justify-between">
-                <span>CURRENT OUTCOME</span>
-                <Trophy className="w-3.5 h-3.5 text-amber-400" />
-              </CardDescription>
-              <CardTitle className="text-base font-bold text-amber-400 truncate">
-                {currentPattern}
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="px-4 pb-4 pt-1">
-              <div className="flex items-center justify-between text-xs text-slate-400">
-                <span>Dice Sum:</span>
-                <span className="font-mono font-bold text-white">
-                  {dice.reduce((a, b) => a + b, 0)} pts
-                </span>
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-
-        {/* Central Casino Table: 6 Dice Tray & Dealer Controller */}
-        <Card className="bg-gradient-to-b from-[#141b33] via-[#0f152b] to-[#0a0f20] border-slate-700/80 shadow-2xl relative overflow-hidden">
-          {/* Ambient Glows */}
-          <div className="absolute top-0 left-1/2 -translate-x-1/2 w-96 h-24 bg-rose-500/10 blur-3xl pointer-events-none" />
-          <div className="absolute bottom-0 right-1/4 w-72 h-20 bg-amber-500/10 blur-3xl pointer-events-none" />
-
-          <CardHeader className="pb-2 border-b border-slate-800/80 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-            <div>
-              <CardTitle className="text-lg font-bold flex items-center gap-2 text-white">
-                <Flame className="w-5 h-5 text-rose-500" />
-                Live 6-Dice Tray (Dealer Master Control)
-              </CardTitle>
-              <CardDescription className="text-slate-400 text-xs">
-                Click any die to override its face value, or trigger a full physics roll.
-              </CardDescription>
-            </div>
-
-            {/* Quick Outcome Presets */}
-            <div className="flex flex-wrap items-center gap-1.5">
-              <span className="text-xs text-slate-400 mr-1">Presets:</span>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => applyPreset("all_hearts")}
-                className="h-7 text-[11px] bg-rose-950/40 border-rose-800/60 text-rose-300 hover:bg-rose-900/60"
-              >
-                ❤️ All Hearts
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => applyPreset("all_bats")}
-                className="h-7 text-[11px] bg-purple-950/40 border-purple-800/60 text-purple-300 hover:bg-purple-900/60"
-              >
-                🦇 All Bats
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => applyPreset("all_crowns")}
-                className="h-7 text-[11px] bg-amber-950/40 border-amber-800/60 text-amber-300 hover:bg-amber-900/60"
-              >
-                👑 All Crowns
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => applyPreset("straight")}
-                className="h-7 text-[11px] bg-sky-950/40 border-sky-800/60 text-sky-300 hover:bg-sky-900/60"
-              >
-                ⚡ Straight (1-6)
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => applyPreset("random")}
-                className="h-7 text-[11px] bg-slate-800 border-slate-700 text-slate-300 hover:bg-slate-700"
-              >
-                🎲 Randomize
-              </Button>
-            </div>
-          </CardHeader>
-
-          <CardContent className="p-6 space-y-6">
-            {/* 6 Dice Visual Container */}
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-4">
-              {dice.map((val, idx) => {
-                const face = DICE_FACES.find((f) => f.id === val) || DICE_FACES[0];
-                const isSelectedForEdit = activeDieIndexToEdit === idx;
-
-                return (
-                  <div key={idx} className="flex flex-col items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={() =>
-                        setActiveDieIndexToEdit(isSelectedForEdit ? null : idx)
-                      }
-                      className={`relative w-full aspect-square max-w-[120px] rounded-2xl p-3 flex flex-col items-center justify-between border-2 transition-all transform duration-200 select-none ${
-                        isRolling
-                          ? "animate-bounce scale-95 border-amber-400/80 shadow-lg shadow-amber-500/20 bg-gradient-to-br from-amber-600/30 to-purple-600/30"
-                          : isSelectedForEdit
-                          ? "ring-4 ring-primary border-white scale-105 shadow-xl bg-slate-800"
-                          : `${face.border} bg-[#16203c] hover:scale-105 hover:shadow-lg shadow-md`
+              {/* Bet Timer Presets */}
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-slate-600 uppercase tracking-wider">1. Betting Time</label>
+                <div className="grid grid-cols-4 gap-1.5">
+                  {[15, 30, 45, 60].map((sec) => (
+                    <Button
+                      key={sec}
+                      size="sm"
+                      onClick={() => handleUpdateTimers(sec, rollTimeSeconds, intervalTimeSeconds)}
+                      className={`text-xs h-9 font-bold transition-all ${
+                        betTimeSeconds === sec
+                          ? "bg-indigo-600 text-white shadow-xs"
+                          : "bg-white border border-slate-300 text-slate-700 hover:bg-slate-100"
                       }`}
                     >
-                      {/* Die Index Badge */}
-                      <span className="absolute top-2 left-2 text-[10px] font-mono font-bold text-slate-400 bg-slate-900/80 px-1.5 py-0.5 rounded">
-                        #{idx + 1}
+                      {sec}s
+                    </Button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Rolling / Settlement Duration */}
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-slate-600 uppercase tracking-wider">2. Rolling Time</label>
+                <div className="grid grid-cols-3 gap-1.5">
+                  {[5, 8, 12].map((sec) => (
+                    <Button
+                      key={sec}
+                      size="sm"
+                      onClick={() => handleUpdateTimers(betTimeSeconds, sec, intervalTimeSeconds)}
+                      className={`text-xs h-9 font-bold transition-all ${
+                        rollTimeSeconds === sec
+                          ? "bg-indigo-600 text-white shadow-xs"
+                          : "bg-white border border-slate-300 text-slate-700 hover:bg-slate-100"
+                      }`}
+                    >
+                      {sec}s
+                    </Button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Next Round Interval / Result Display Duration */}
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-slate-600 uppercase tracking-wider">3. Result Wait Time</label>
+                <div className="grid grid-cols-3 gap-1.5">
+                  {[5, 10, 15].map((sec) => (
+                    <Button
+                      key={sec}
+                      size="sm"
+                      onClick={() => handleUpdateTimers(betTimeSeconds, rollTimeSeconds, sec)}
+                      className={`text-xs h-9 font-bold transition-all ${
+                        intervalTimeSeconds === sec
+                          ? "bg-indigo-600 text-white shadow-xs"
+                          : "bg-white border border-slate-300 text-slate-700 hover:bg-slate-100"
+                      }`}
+                    >
+                      {sec}s
+                    </Button>
+                  ))}
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* 2. LIVE PLAYER BETTING POOLS */}
+          <Card className="bg-white border border-slate-200 shadow-xs rounded-2xl overflow-hidden">
+            <CardHeader className="p-4 pb-3 border-b border-slate-100 flex flex-row items-center justify-between bg-slate-50/40">
+              <div className="flex items-center gap-2">
+                <Users className="w-5 h-5 text-indigo-600" />
+                <div>
+                  <CardTitle className="text-sm font-bold text-slate-800 uppercase tracking-wider">
+                    Live Player Betting Pools (Round #{roundNumber})
+                  </CardTitle>
+                  <p className="text-xs text-slate-500 font-normal">
+                    Real-time player distribution across all 6 faces — analyze live bets to stage manual dice
+                  </p>
+                </div>
+              </div>
+              <div className="text-right">
+                <span className="text-xs text-slate-500 block">Total Pool Placed</span>
+                <strong className="text-emerald-700 font-mono text-base font-black">₹{totalBetPool.toLocaleString()}</strong>
+                <span className="text-[11px] text-slate-500 ml-1 font-medium">({totalBettors} active bets)</span>
+              </div>
+            </CardHeader>
+            <CardContent className="p-4 grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-3">
+              {DICE_FACES.map((face) => {
+                const pool = betPools[face.id] || { totalAmount: 0, bettorsCount: 0 };
+                const percentage = totalBetPool > 0 ? Math.round((pool.totalAmount / totalBetPool) * 100) : 0;
+                const isZeroRisk = pool.totalAmount === 0 && totalBetPool > 0;
+                const isHighestPool = pool.totalAmount > 0 && pool.totalAmount === maxPoolAmount;
+
+                return (
+                  <div
+                    key={face.id}
+                    className={`rounded-2xl border-2 p-3.5 flex flex-col items-center justify-between text-center transition-all bg-white hover:shadow-md relative ${
+                      isHighestPool
+                        ? "border-rose-300 ring-2 ring-rose-100"
+                        : isZeroRisk
+                        ? "border-emerald-300 ring-2 ring-emerald-100"
+                        : face.border
+                    }`}
+                  >
+                    {/* Visual Risk Tag */}
+                    {isZeroRisk ? (
+                      <span className="absolute -top-2.5 px-2 py-0.5 rounded-full bg-emerald-600 text-[9px] font-bold text-white shadow-xs">
+                        💎 0 Bets (Max Profit)
                       </span>
+                    ) : isHighestPool ? (
+                      <span className="absolute -top-2.5 px-2 py-0.5 rounded-full bg-rose-600 text-[9px] font-bold text-white shadow-xs">
+                        🔥 Heaviest Pool
+                      </span>
+                    ) : null}
 
-                      {/* Face Emoji & Glow */}
-                      <div className="flex-1 flex items-center justify-center">
-                        <span className="text-4xl sm:text-5xl filter drop-shadow-md transition-transform">
-                          {face.symbol}
-                        </span>
-                      </div>
+                    <div className="p-2 rounded-xl bg-slate-50 mt-1 mb-1">
+                      <img src={face.image} alt={face.name} className="w-10 h-10 object-contain drop-shadow-sm" />
+                    </div>
 
-                      {/* Face Name & Value */}
-                      <div className="w-full flex items-center justify-between pt-1 border-t border-slate-700/50 text-[11px] font-medium">
-                        <span className={face.text}>{face.name}</span>
-                        <span className="font-mono text-slate-400">[{val}]</span>
-                      </div>
-                    </button>
+                    <div className={`text-xs font-black uppercase tracking-wider ${face.text}`}>{face.name}</div>
 
-                    {/* Quick Face Selector Popover for this Die */}
-                    {isSelectedForEdit && (
-                      <div className="w-full p-2 rounded-xl bg-slate-900 border border-primary shadow-2xl flex flex-col gap-1.5 z-20 animate-in fade-in zoom-in-95">
-                        <div className="text-[10px] font-semibold text-center text-slate-400">
-                          Set Die #{idx + 1}:
-                        </div>
-                        <div className="grid grid-cols-3 gap-1">
-                          {DICE_FACES.map((f) => (
-                            <button
-                              key={f.id}
-                              type="button"
-                              onClick={() => handleSetDieValue(idx, f.id)}
-                              className={`p-1.5 rounded text-xs flex flex-col items-center justify-center border ${
-                                f.id === val
-                                  ? "bg-primary text-white border-primary"
-                                  : "bg-slate-800 border-slate-700 text-slate-200 hover:bg-slate-700"
-                              }`}
-                            >
-                              <span>{f.symbol}</span>
-                              <span className="text-[9px] font-mono">{f.name}</span>
-                            </button>
-                          ))}
-                        </div>
-                      </div>
+                    <div className="mt-2 text-lg font-black text-slate-900 font-mono">
+                      ₹{pool.totalAmount.toLocaleString()}
+                    </div>
+
+                    <div className="text-[11px] text-slate-500 font-medium mt-0.5">
+                      {pool.bettorsCount} bets ({percentage}%)
+                    </div>
+
+                    {/* Share Progress Bar */}
+                    <div className="w-full bg-slate-100 h-2 rounded-full overflow-hidden mt-2">
+                      <div
+                        className={`h-full rounded-full transition-all duration-500 ${
+                          isHighestPool ? "bg-rose-500" : isZeroRisk ? "bg-emerald-500" : "bg-indigo-600"
+                        }`}
+                        style={{ width: `${percentage}%` }}
+                      />
+                    </div>
+
+                    {/* Quick 1-Click Action for Manual Mode */}
+                    {gameMode === "MANUAL" && (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => handleSetAllToFace(face.id)}
+                        className="w-full mt-2.5 text-[10px] h-7 font-bold border-slate-300 hover:bg-indigo-50 hover:border-indigo-400 text-slate-700"
+                      >
+                        Set All 6x {face.name}
+                      </Button>
                     )}
                   </div>
                 );
               })}
-            </div>
+            </CardContent>
+          </Card>
 
-            {/* Primary Action Buttons */}
-            <div className="flex flex-col sm:flex-row items-center justify-center gap-4 pt-4 border-t border-slate-800">
-              <Button
-                size="lg"
-                disabled={isRolling}
-                onClick={() => triggerRollDice()}
-                className="w-full sm:w-auto min-w-[220px] h-12 text-base font-bold bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white shadow-lg shadow-emerald-900/40 gap-2"
-              >
-                <Play className="w-5 h-5 fill-current" />
-                {isRolling ? "Rolling 6 Dice..." : "ROLL 6 DICE"}
-              </Button>
+          {/* 3. ULTRA-CLEAR INTERACTIVE 6-DICE STAGE & LARGE VISUAL SELECTOR */}
+          <Card className="bg-white border border-slate-200 shadow-xs rounded-2xl overflow-hidden">
+            <CardHeader className="p-4 pb-3 border-b border-slate-100 flex flex-row items-center justify-between bg-slate-50/30">
+              <div className="flex items-center gap-2">
+                <Sparkles className="w-5 h-5 text-indigo-600" />
+                <div>
+                  <CardTitle className="text-sm font-bold text-slate-800 uppercase tracking-wider">
+                    Interactive 6-Dice Stage & Manual Face Builder
+                  </CardTitle>
+                  <p className="text-xs text-slate-500 font-normal">
+                    Select any of the 6 slots, then tap any face button below for rapid 1-click configuration
+                  </p>
+                </div>
+              </div>
 
-              <Button
-                size="lg"
-                variant="outline"
-                disabled={isRolling}
-                onClick={() => {
-                  setGamePhase("BETS_LOCKED");
-                  triggerRollDice();
-                }}
-                className="w-full sm:w-auto h-12 text-sm font-semibold border-amber-500/40 bg-amber-500/10 text-amber-300 hover:bg-amber-500/20 gap-2"
-              >
-                <Lock className="w-4 h-4" />
-                Lock Bets & Roll
-              </Button>
+              {/* Big Visual Countdown Pill */}
+              <div className={`px-4 py-1.5 rounded-2xl border flex items-center gap-3 shadow-xs ${
+                gamePhase === "BETTING_OPEN"
+                  ? "bg-emerald-50 border-emerald-300 text-emerald-800"
+                  : isRolling
+                  ? "bg-amber-50 border-amber-300 text-amber-800 animate-pulse"
+                  : "bg-indigo-50 border-indigo-300 text-indigo-800"
+              }`}>
+                <Clock className="w-4 h-4" />
+                <div className="flex items-center gap-1.5">
+                  <span className="text-[10px] font-bold tracking-wider uppercase opacity-90">
+                    {gamePhase === "BETTING_OPEN" ? "BETTING:" : isRolling ? "ROLLING:" : "NEXT ROUND:"}
+                  </span>
+                  <span className="text-xl font-black font-mono leading-none">
+                    {timeLeft}s
+                  </span>
+                </div>
+              </div>
+            </CardHeader>
 
-              <Button
-                size="lg"
-                variant="outline"
-                onClick={startNewRound}
-                className="w-full sm:w-auto h-12 text-sm font-semibold border-slate-700 bg-slate-800 text-slate-200 hover:bg-slate-700 gap-2"
-              >
-                <RotateCcw className="w-4 h-4" />
-                Start Next Round (#{roundNumber + 1})
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* Live Stake Distribution across 6 Faces */}
-        <div className="space-y-3">
-          <div className="flex items-center justify-between">
-            <h3 className="text-base font-bold text-white flex items-center gap-2">
-              <Users className="w-4 h-4 text-sky-400" />
-              Live Betting Board (Symbol Pool Breakdown)
-            </h3>
-            <span className="text-xs text-slate-400 font-mono">
-              Total Stakes: ₹{totalBetPool.toLocaleString("en-IN")}
-            </span>
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
-            {DICE_FACES.map((face) => {
-              const pool = betPools.find((p) => p.faceId === face.id) || {
-                faceId: face.id,
-                totalAmount: 0,
-                bettorsCount: 0,
-              };
-              const sharePct = totalBetPool > 0 ? Math.round((pool.totalAmount / totalBetPool) * 100) : 0;
-              const matchesOnTray = faceCounts[face.id] || 0;
-
-              return (
-                <Card
-                  key={face.id}
-                  className={`bg-[#11182c] border-slate-800 text-slate-100 transition-all ${
-                    matchesOnTray > 0 ? `ring-2 ring-emerald-500/50 ${face.border}` : ""
-                  }`}
-                >
-                  <CardHeader className="p-3 pb-2 flex flex-row items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <span className="text-2xl">{face.symbol}</span>
-                      <div>
-                        <div className={`font-bold text-xs ${face.text}`}>{face.name}</div>
-                        <div className="text-[10px] text-slate-400 font-mono">Face #{face.id}</div>
-                      </div>
-                    </div>
-
-                    {matchesOnTray > 0 && (
-                      <Badge className="bg-emerald-500 text-slate-950 font-extrabold text-[10px] px-1.5 py-0">
-                        {matchesOnTray}x Hit
-                      </Badge>
+            <CardContent className="p-5 flex flex-col gap-6">
+              {/* Status Banner */}
+              {gameMode === "MANUAL" && (
+                <div className={`w-full px-4 py-2.5 rounded-xl border flex flex-wrap items-center justify-between gap-3 text-xs ${
+                  serverPresetDice
+                    ? "bg-emerald-50 border-emerald-300 text-emerald-900"
+                    : "bg-amber-50 border-amber-300 text-amber-900"
+                }`}>
+                  <div className="flex items-center gap-2">
+                    {serverPresetDice ? (
+                      <CheckCircle className="w-4 h-4 text-emerald-600 shrink-0" />
+                    ) : (
+                      <Clock className="w-4 h-4 text-amber-600 shrink-0" />
                     )}
-                  </CardHeader>
-
-                  <CardContent className="p-3 pt-0 space-y-2">
-                    <div className="flex justify-between items-baseline">
-                      <span className="text-[11px] text-slate-400">Total Stake:</span>
-                      <span className="font-mono font-bold text-sm text-emerald-400">
-                        ₹{pool.totalAmount.toLocaleString("en-IN")}
-                      </span>
+                    <div>
+                      <strong>
+                        {serverPresetDice
+                          ? `Configured Outcome for Round #${roundNumber}:`
+                          : "Manual Mode Ready:"}
+                      </strong>{" "}
+                      {serverPresetDice ? (
+                        <span className="font-mono font-bold text-emerald-700">
+                          [{serverPresetDice.map((d) => DICE_FACES.find((f) => f.id === d)?.name || d).join(", ")}] — Active!
+                        </span>
+                      ) : (
+                        <span>
+                          Pick 6 faces below before countdown ends (fallback: auto random if not set).
+                        </span>
+                      )}
                     </div>
+                  </div>
 
-                    <div className="flex justify-between text-[10px] text-slate-400">
-                      <span>Bettors: {pool.bettorsCount}</span>
-                      <span>{sharePct}% pool</span>
-                    </div>
+                  <div className="text-[11px] font-bold text-slate-600">
+                    Pattern: <strong className="text-indigo-700">{getPatternName(dice)}</strong>
+                  </div>
+                </div>
+              )}
 
-                    {/* Mini Progress Bar */}
-                    <div className="w-full h-1.5 bg-slate-800 rounded-full overflow-hidden">
+              {/* 6 LARGE DICE SLOTS RACK */}
+              <div className="w-full flex flex-col gap-2">
+                <div className="flex items-center justify-between px-1">
+                  <span className="text-xs font-extrabold text-slate-700 uppercase tracking-wider">
+                    6 Dice Slots (Active: Slot #{activeSlot + 1})
+                  </span>
+                  <div className="flex items-center gap-2">
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => setActiveSlot((prev) => (prev === 0 ? 5 : prev - 1))}
+                      className="h-7 text-xs text-slate-600 hover:text-indigo-600 px-2"
+                    >
+                      <ChevronLeft className="w-3.5 h-3.5 mr-1" />
+                      Prev Slot
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => setActiveSlot((prev) => (prev + 1) % 6)}
+                      className="h-7 text-xs text-slate-600 hover:text-indigo-600 px-2"
+                    >
+                      Next Slot
+                      <ChevronRight className="w-3.5 h-3.5 ml-1" />
+                    </Button>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-3 w-full">
+                  {dice.map((faceVal, idx) => {
+                    const faceMeta = DICE_FACES.find((f) => f.id === faceVal) || DICE_FACES[0];
+                    const isActive = activeSlot === idx;
+
+                    return (
                       <div
-                        className={`h-full bg-gradient-to-r ${face.color}`}
-                        style={{ width: `${sharePct}%` }}
-                      />
-                    </div>
-                  </CardContent>
-                </Card>
-              );
-            })}
-          </div>
+                        key={idx}
+                        onClick={() => setActiveSlot(idx)}
+                        className={`rounded-2xl border-2 p-3.5 flex flex-col items-center justify-between text-center transition-all bg-white cursor-pointer relative ${
+                          isActive
+                            ? "border-indigo-600 ring-4 ring-indigo-100 shadow-md scale-[1.02]"
+                            : "border-slate-200 shadow-xs hover:border-indigo-300 hover:shadow-sm"
+                        }`}
+                      >
+                        {/* Slot Tag */}
+                        <div className="w-full flex items-center justify-between">
+                          <span className={`text-[10px] font-black px-2 py-0.5 rounded-full ${
+                            isActive ? "bg-indigo-600 text-white" : "bg-slate-100 text-slate-700"
+                          }`}>
+                            Die #{idx + 1}
+                          </span>
+                          {isActive && (
+                            <span className="text-[9px] font-bold text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded">
+                              ACTIVE
+                            </span>
+                          )}
+                        </div>
+
+                        {/* Large Clear PNG Image */}
+                        <div className="my-3 p-1">
+                          <img
+                            src={faceMeta.image}
+                            alt={faceMeta.name}
+                            className={`w-14 h-14 object-contain drop-shadow-sm transition-transform ${
+                              isRolling ? "animate-bounce" : ""
+                            }`}
+                          />
+                        </div>
+
+                        {/* Face Name Badge */}
+                        <div className={`w-full py-1 rounded-lg text-xs font-black uppercase tracking-wider ${faceMeta.bg} ${faceMeta.text}`}>
+                          {faceMeta.symbol} {faceMeta.name}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* DEDICATED LARGE 6-FACE PALETTE SELECTOR (Direct, Big, High-Contrast Buttons) */}
+              <div className="w-full bg-slate-50 border border-slate-200 rounded-2xl p-4 flex flex-col gap-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-black text-slate-800 uppercase tracking-wider flex items-center gap-1.5">
+                    <Zap className="w-4 h-4 text-amber-500" />
+                    Tap Face to Assign &rarr; <span className="text-indigo-600 font-black">Die #{activeSlot + 1}</span>:
+                  </span>
+                  <span className="text-xs text-slate-500 font-medium">
+                    (Auto-advances to next slot on tap)
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-3">
+                  {DICE_FACES.map((face) => (
+                    <button
+                      key={face.id}
+                      onClick={() => handlePickFaceForActiveSlot(face.id)}
+                      className={`p-3 rounded-xl border-2 bg-white flex flex-col items-center justify-center gap-1.5 shadow-xs hover:shadow-md transition-all hover:scale-105 active:scale-95 group ${face.border}`}
+                    >
+                      <img src={face.image} alt={face.name} className="w-10 h-10 object-contain drop-shadow-sm group-hover:scale-110 transition-transform" />
+                      <span className={`text-xs font-black uppercase tracking-wider ${face.text}`}>
+                        {face.symbol} {face.name}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* COMPREHENSIVE SMART PRESETS MATRIX */}
+              <div className="w-full flex flex-col gap-3 pt-2 border-t border-slate-100">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-slate-700 uppercase tracking-wider flex items-center gap-1.5">
+                    <Trophy className="w-4 h-4 text-amber-500" />
+                    Complete Smart Presets Matrix
+                  </span>
+                  <span className="text-xs text-slate-500 font-medium">1-Click instant configuration</span>
+                </div>
+
+                {/* Category 1: House Strategy */}
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="text-xs font-bold text-slate-500 min-w-[100px]">House Strategy:</span>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => applyPreset("lowest_pool")}
+                    className="text-xs h-8 border-emerald-300 bg-emerald-50 text-emerald-800 hover:bg-emerald-100 gap-1.5 font-bold shadow-2xs"
+                  >
+                    💎 Max House Profit (Lowest/Zero Pool)
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => applyPreset("lowest_split")}
+                    className="text-xs h-8 border-emerald-300 bg-emerald-50/70 text-emerald-800 hover:bg-emerald-100 gap-1.5 font-semibold"
+                  >
+                    🥈 2 Lowest Split (3x + 3x)
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => applyPreset("highest_pool")}
+                    className="text-xs h-8 border-rose-300 bg-rose-50 text-rose-800 hover:bg-rose-100 gap-1.5 font-bold"
+                  >
+                    🔥 Max Player Payout (Jackpot Pool)
+                  </Button>
+                </div>
+
+                {/* Category 2: Single Face Multipliers */}
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="text-xs font-bold text-slate-500 min-w-[100px]">All 6x Multipliers:</span>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => applyPreset("all_bats")}
+                    className="text-xs h-8 border-purple-200 bg-purple-50 text-purple-700 hover:bg-purple-100 gap-1 font-semibold"
+                  >
+                    <img src="/dice-faces/bat.png" alt="Bat" className="w-3.5 h-3.5 object-contain" />
+                    All Bats
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => applyPreset("all_diamonds")}
+                    className="text-xs h-8 border-cyan-200 bg-cyan-50 text-cyan-700 hover:bg-cyan-100 gap-1 font-semibold"
+                  >
+                    <img src="/dice-faces/diamond.png" alt="Diamond" className="w-3.5 h-3.5 object-contain" />
+                    All Diamonds
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => applyPreset("all_hearts")}
+                    className="text-xs h-8 border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100 gap-1 font-semibold"
+                  >
+                    <img src="/dice-faces/heart.png" alt="Heart" className="w-3.5 h-3.5 object-contain" />
+                    All Hearts
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => applyPreset("all_leaves")}
+                    className="text-xs h-8 border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 gap-1 font-semibold"
+                  >
+                    <img src="/dice-faces/leaf.png" alt="Leaf" className="w-3.5 h-3.5 object-contain" />
+                    All Leaves
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => applyPreset("all_trees")}
+                    className="text-xs h-8 border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100 gap-1 font-semibold"
+                  >
+                    <img src="/dice-faces/tree.png" alt="Tree" className="w-3.5 h-3.5 object-contain" />
+                    All Trees
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => applyPreset("all_crowns")}
+                    className="text-xs h-8 border-yellow-200 bg-yellow-50 text-yellow-700 hover:bg-yellow-100 gap-1 font-semibold"
+                  >
+                    <img src="/dice-faces/crown.png" alt="Crown" className="w-3.5 h-3.5 object-contain" />
+                    All Crowns
+                  </Button>
+                </div>
+
+                {/* Category 3: Combos & Action Triggers */}
+                <div className="flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-slate-100">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-xs font-bold text-slate-500 min-w-[100px]">Casino Combos:</span>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => applyPreset("straight")}
+                      className="text-xs h-8 border-cyan-200 bg-cyan-50 text-cyan-700 hover:bg-cyan-100 gap-1 font-semibold"
+                    >
+                      ⚡ Straight (1-6)
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => applyPreset("five_kind")}
+                      className="text-xs h-8 border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100 gap-1 font-semibold"
+                    >
+                      ⭐ Five of Kind (5x+1)
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => applyPreset("four_kind")}
+                      className="text-xs h-8 border-purple-200 bg-purple-50 text-purple-700 hover:bg-purple-100 gap-1 font-semibold"
+                    >
+                      🔥 Four of Kind (4x+2x)
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => applyPreset("full_house")}
+                      className="text-xs h-8 border-indigo-200 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 gap-1 font-semibold"
+                    >
+                      ✨ Full House (3x+3x)
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => applyPreset("random")}
+                      className="text-xs h-8 border-slate-300 bg-white text-slate-700 hover:bg-slate-100 gap-1 font-semibold"
+                    >
+                      🎲 Randomize
+                    </Button>
+                  </div>
+
+                  {/* Actions */}
+                  <div className="flex items-center gap-2">
+                    <Button
+                      size="sm"
+                      onClick={() => handleTriggerAction("roll_now")}
+                      disabled={actionLoading || isRolling}
+                      className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold shadow-xs gap-1.5 text-xs h-9"
+                    >
+                      <Play className="w-3.5 h-3.5 fill-current" />
+                      Force Roll Now
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => handleTriggerAction("next_round")}
+                      disabled={actionLoading}
+                      className="border-slate-300 bg-white text-slate-700 hover:bg-slate-100 font-bold gap-1.5 text-xs h-9"
+                    >
+                      <RefreshCw className="w-3.5 h-3.5" />
+                      Advance Round
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
         </div>
 
-        {/* Bottom Split Section: Live Player Bets Feed + Recent Rounds History */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {/* Live Player Activity Feed */}
-          <Card className="bg-[#11182c] border-slate-800 text-slate-100 shadow-md">
-            <CardHeader className="p-4 pb-2 border-b border-slate-800">
-              <CardTitle className="text-sm font-bold flex items-center gap-2 text-white">
-                <Users className="w-4 h-4 text-sky-400" />
-                Live Player Bets Stream
-              </CardTitle>
-              <CardDescription className="text-xs text-slate-400">
-                Real-time incoming bets from connected mobile app players.
-              </CardDescription>
+        {/* RIGHT COLUMN (4 Cols): STICKY, SELF-CONTAINED RESPONSIVE ROUND HISTORY */}
+        <div className="lg:col-span-4 w-full sticky top-20">
+          <Card className="bg-white border border-slate-200 shadow-xs rounded-2xl flex flex-col max-h-[calc(100vh-6.5rem)] overflow-hidden">
+            <CardHeader className="p-4 pb-3 border-b border-slate-100 flex flex-row items-center justify-between bg-slate-50/60 shrink-0">
+              <div className="flex items-center gap-2">
+                <Trophy className="w-4 h-4 text-amber-500" />
+                <CardTitle className="text-sm font-bold text-slate-800 uppercase tracking-wider">
+                  Recent Rounds History
+                </CardTitle>
+              </div>
+              <Badge variant="outline" className="text-[10px] border-slate-200 text-slate-600 bg-white font-medium">
+                Live Audit
+              </Badge>
             </CardHeader>
-            <CardContent className="p-0">
-              <div className="divide-y divide-slate-800/80 max-h-60 overflow-y-auto">
-                {liveBetsFeed.map((bet) => {
-                  const face = DICE_FACES.find((f) => f.id === bet.faceId) || DICE_FACES[0];
+            <CardContent className="p-3.5 flex-1 overflow-y-auto space-y-2.5">
+              {history.length === 0 ? (
+                <div className="text-center py-12 text-slate-400 text-xs">
+                  No settled rounds yet. Game loop will record outcomes automatically.
+                </div>
+              ) : (
+                history.map((rh, idx) => {
+                  const diceArr = Array.isArray(rh.diceResults) ? rh.diceResults.map((v: any) => Number(v)) : [];
+                  const pattern = getPatternName(diceArr);
+                  const profit = (rh.totalBetsAmount || 0) - (rh.totalPayoutAmount || 0);
+
                   return (
-                    <div key={bet.id} className="p-3 flex items-center justify-between text-xs hover:bg-slate-800/30">
-                      <div className="flex items-center gap-2.5">
-                        <div className="w-7 h-7 rounded-full bg-slate-800 flex items-center justify-center font-bold text-primary text-[10px]">
-                          {bet.playerName.charAt(0)}
+                    <div
+                      key={idx}
+                      className="bg-slate-50/80 border border-slate-200 rounded-xl p-3 flex flex-col gap-2 hover:border-indigo-300 transition-colors"
+                    >
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs font-bold text-indigo-700 font-mono">
+                            Round #{rh.roundNumber}
+                          </span>
+                          <Badge className="text-[9px] bg-white text-slate-700 border border-slate-200 px-1.5 py-0 font-semibold">
+                            {rh.phase}
+                          </Badge>
                         </div>
-                        <div>
-                          <div className="font-medium text-slate-200">{bet.playerName}</div>
-                          <div className="text-[10px] text-slate-400">{bet.time}</div>
-                        </div>
+                        <span className="text-[10px] text-slate-500 font-mono">
+                          {new Date(rh.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+                        </span>
                       </div>
 
-                      <div className="flex items-center gap-3">
-                        <Badge
-                          variant="outline"
-                          className={`${face.border} ${face.bg} ${face.text} text-[11px] gap-1 px-2 py-0.5`}
-                        >
-                          <span>{face.symbol}</span>
-                          <span>{face.name}</span>
-                        </Badge>
-                        <span className="font-mono font-bold text-emerald-400 text-sm">
-                          ₹{bet.amount}
+                      {/* 6 Dice Icons */}
+                      <div className="flex items-center gap-1.5 py-1">
+                        {diceArr.map((d, dIdx) => {
+                          const face = DICE_FACES.find((f) => f.id === d);
+                          return (
+                            <div
+                              key={dIdx}
+                              className="w-7 h-7 rounded-lg bg-white border border-slate-200 flex items-center justify-center p-1 shadow-2xs"
+                            >
+                              {face?.image ? (
+                                <img src={face.image} alt={face.name} className="w-5 h-5 object-contain" />
+                              ) : (
+                                "🎲"
+                              )}
+                            </div>
+                          );
+                        })}
+                        <span className="text-[11px] font-bold text-amber-700 ml-1 truncate">
+                          {pattern}
+                        </span>
+                      </div>
+
+                      <div className="flex items-center justify-between text-[11px] pt-1.5 border-t border-slate-200/80">
+                        <span className="text-slate-600">
+                          Total Bets: <strong className="text-slate-900 font-mono font-bold">₹{(rh.totalBetsAmount || 0).toLocaleString()}</strong>
+                        </span>
+                        <span className={`font-mono font-bold ${profit >= 0 ? "text-emerald-700" : "text-rose-700"}`}>
+                          House: {profit >= 0 ? `+₹${profit.toLocaleString()}` : `-₹${Math.abs(profit).toLocaleString()}`}
                         </span>
                       </div>
                     </div>
                   );
-                })}
-              </div>
-            </CardContent>
-          </Card>
-
-          {/* Recent Rounds History Log */}
-          <Card className="bg-[#11182c] border-slate-800 text-slate-100 shadow-md">
-            <CardHeader className="p-4 pb-2 border-b border-slate-800">
-              <CardTitle className="text-sm font-bold flex items-center gap-2 text-white">
-                <Trophy className="w-4 h-4 text-amber-400" />
-                Recent Rounds History
-              </CardTitle>
-              <CardDescription className="text-xs text-slate-400">
-                Previous 6-dice roll outcomes and house margins.
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="p-0">
-              <div className="divide-y divide-slate-800/80 max-h-60 overflow-y-auto">
-                {history.map((h) => {
-                  const isHouseProfit = h.houseProfit >= 0;
-                  return (
-                    <div key={h.roundNumber} className="p-3 flex items-center justify-between text-xs hover:bg-slate-800/30">
-                      <div className="space-y-1">
-                        <div className="flex items-center gap-2">
-                          <span className="font-mono font-bold text-slate-300">#{h.roundNumber}</span>
-                          <Badge variant="secondary" className="bg-slate-800 text-slate-300 text-[10px] px-1.5 py-0">
-                            {h.pattern}
-                          </Badge>
-                        </div>
-                        {/* 6 Dice Emojis */}
-                        <div className="flex items-center gap-1 text-sm">
-                          {h.dice.map((d, i) => (
-                            <span key={i}>{DICE_FACES.find((f) => f.id === d)?.symbol || "🎲"}</span>
-                          ))}
-                        </div>
-                      </div>
-
-                      <div className="text-right space-y-0.5">
-                        <div className="text-[11px] text-slate-400 font-mono">
-                          Pool: ₹{h.totalBets.toLocaleString("en-IN")}
-                        </div>
-                        <div
-                          className={`font-mono font-semibold text-xs ${
-                            isHouseProfit ? "text-emerald-400" : "text-red-400"
-                          }`}
-                        >
-                          {isHouseProfit ? "+" : ""}₹{h.houseProfit.toLocaleString("en-IN")} Margin
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
+                })
+              )}
             </CardContent>
           </Card>
         </div>
-      </div>
-    </main>
+      </main>
+    </div>
   );
 }
