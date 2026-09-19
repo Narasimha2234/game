@@ -1,10 +1,23 @@
-import { Body, Controller, Get, Param, Post } from "@nestjs/common";
-import { PlaceBetDto, ResolveBetDto } from "./dto/place-bet.dto.js";
+import { Body, Controller, Get, Param, Post, Query } from "@nestjs/common";
+import { PlaceBetDto } from "./dto/place-bet.dto.js";
+import { GameControlDto } from "./dto/game-control.dto.js";
 import { GameService } from "./game.service.js";
 
 @Controller("api/game")
 export class GameController {
   constructor(private readonly gameService: GameService) {}
+
+  @Get("state")
+  async getGameState(@Query("userId") userId?: string) {
+    const state = await this.gameService.getGameState(userId);
+    return { success: true, data: state };
+  }
+
+  @Post("control")
+  async updateGameControl(@Body() controlDto: GameControlDto) {
+    const result = await this.gameService.updateGameControl(controlDto);
+    return { success: true, ...result };
+  }
 
   @Post("bets")
   async placeBet(@Body() placeBetDto: PlaceBetDto) {
@@ -14,13 +27,7 @@ export class GameController {
       Number(placeBetDto.amount),
     );
 
-    return response;
-  }
-
-  @Post("bets/:betId/resolve")
-  async resolveBet(@Param("betId") betId: string, @Body() resolveBetDto: ResolveBetDto) {
-    const response = await this.gameService.resolveBet(betId, resolveBetDto.diceRolls);
-    return response;
+    return { success: true, ...response };
   }
 
   @Get("bets/user/:userId")
@@ -33,5 +40,11 @@ export class GameController {
   async getAllBets() {
     const bets = await this.gameService.getAllBets();
     return { success: true, data: bets };
+  }
+
+  @Get("history")
+  async getHistory(@Query("limit") limit?: string) {
+    const history = await this.gameService.getRecentRounds(Number(limit) || 20);
+    return { success: true, data: history };
   }
 }

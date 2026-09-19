@@ -8,6 +8,7 @@ import {
   UpdateDateColumn,
 } from "typeorm";
 import { User } from "../../user/entity/user.entity.js";
+import { GameRound } from "./game-round.entity.js";
 
 export enum GameBetStatus {
   PENDING = "pending",
@@ -23,6 +24,13 @@ export class GameBet {
   @ManyToOne(() => User, { eager: true, nullable: false })
   @JoinColumn({ name: "user_id" })
   user: User;
+
+  @Column({ type: "int", nullable: true })
+  roundNumber?: number;
+
+  @ManyToOne(() => GameRound, (round) => round.bets, { nullable: true, onDelete: "SET NULL" })
+  @JoinColumn({ name: "round_id" })
+  round?: GameRound;
 
   @Column({ type: "int" })
   selectedNumber: number;
@@ -48,3 +56,4 @@ export class GameBet {
   @UpdateDateColumn({ type: "timestamp" })
   updatedAt: Date;
 }
+

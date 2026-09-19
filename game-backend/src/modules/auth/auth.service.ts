@@ -36,7 +36,9 @@ export class AuthService {
 
   async refreshTokens(userId: string, refreshToken: string) {
     const user = await this.userService.getUserById(userId);
-    if (!user || !user.refreshToken) throw new UnauthorizedException('Access Denied');
+    if (!user || !user.refreshToken || user.isActive === false) {
+      throw new UnauthorizedException('Access Denied: Account is deactivated');
+    }
 
     const isMatch = await bcrypt.compare(refreshToken, user.refreshToken);
     if (!isMatch) throw new UnauthorizedException('Access Denied');

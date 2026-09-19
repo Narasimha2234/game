@@ -130,6 +130,10 @@ export class UserService implements OnModuleInit {
             throw new UnauthorizedException("Invalid credentials");
         }
 
+        if (user.isActive === false) {
+            throw new UnauthorizedException("Your account has been deactivated. Please contact the administrator.");
+        }
+
         const isPasswordValid = await bcrypt.compare(loginUserDto.password, user.password);
 
         if (!isPasswordValid) {
@@ -157,12 +161,16 @@ export class UserService implements OnModuleInit {
 
     public async getUserWallet(userId: string) {
         const user = await this.getUserById(userId);
+        if (user.isActive === false) {
+            throw new UnauthorizedException("Your account has been deactivated. Please contact the administrator.");
+        }
         return {
             userId: user.id,
             name: user.name,
             mobile: user.mobile,
             walletBalance: user.walletBalance,
             role: user.role,
+            isActive: user.isActive,
         };
     }
 
@@ -188,6 +196,9 @@ export class UserService implements OnModuleInit {
     public async updateUserStatus(userId: string, isActive?: boolean): Promise<User> {
         const user = await this.getUserById(userId);
         user.isActive = typeof isActive === "boolean" ? isActive : !user.isActive;
+        if (!user.isActive) {
+            user.refreshToken = null;
+        }
         return this.userRepository.save(user);
     }
 }
