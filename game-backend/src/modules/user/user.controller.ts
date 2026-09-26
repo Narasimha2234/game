@@ -74,16 +74,30 @@ export class UserController {
         const users = await this.userService.getAllUsers();
         return {
             success: true,
-            data: users.map((user) => ({
-                id: user.id,
-                name: user.name,
-                mobile: user.mobile,
-                email: user.email,
-                role: user.role,
-                walletBalance: user.walletBalance,
-                isActive: user.isActive,
-                createdAt: user.createdAt,
-            })),
+            data: users.map((user) => {
+                const now = Date.now();
+                const lastActiveTime = user.lastActiveAt ? new Date(user.lastActiveAt).getTime() : 0;
+                const isSessionActive = !!(
+                    user.activeSessionId &&
+                    user.lastActiveAt &&
+                    now - lastActiveTime < 60 * 1000
+                );
+
+                return {
+                    id: user.id,
+                    name: user.name,
+                    mobile: user.mobile,
+                    email: user.email,
+                    role: user.role,
+                    walletBalance: user.walletBalance,
+                    isActive: user.isActive,
+                    activeSessionId: user.activeSessionId,
+                    lastActiveAt: user.lastActiveAt,
+                    activeDeviceId: user.activeDeviceId,
+                    isSessionActive,
+                    createdAt: user.createdAt,
+                };
+            }),
         };
     }
 
@@ -110,6 +124,30 @@ export class UserController {
                 name: updatedUser.name,
                 isActive: updatedUser.isActive,
             },
+        };
+    }
+
+    @Patch(":id/password")
+    async resetUserPassword(
+        @Param("id") userId: string,
+        @Body() body: { password?: string },
+    ) {
+        if (!body.password || typeof body.password !== "string" || body.password.trim().length < 6) {
+            throw new BadRequestException("Password must be at least 6 characters long");
+        }
+        await this.userService.resetUserPassword(userId, body.password.trim());
+        return {
+            message: "Password updated successfully",
+            success: true,
+        };
+    }
+
+    @Post(":id/unlock-session")
+    async unlockSession(@Param("id") userId: string) {
+        await this.userService.clearActiveSession(userId);
+        return {
+            message: "Player device session unlocked successfully",
+            success: true,
         };
     }
 }

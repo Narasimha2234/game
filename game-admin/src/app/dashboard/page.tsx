@@ -7,6 +7,7 @@ import api from "@/lib/axios";
 import { AddPlayerDialog } from "@/components/AddPlayerDialog";
 import { UpdateWalletDialog } from "@/components/UpdateWalletDialog";
 import { PlayerTransactionsDialog } from "@/components/PlayerTransactionsDialog";
+import { ResetPasswordDialog } from "@/components/ResetPasswordDialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -34,6 +35,8 @@ import {
   Receipt,
   UserCheck,
   UserX,
+  KeyRound,
+  Smartphone,
 } from "lucide-react";
 
 interface UserItem {
@@ -44,6 +47,10 @@ interface UserItem {
   role: string;
   walletBalance: number;
   isActive: boolean;
+  activeSessionId?: string | null;
+  lastActiveAt?: string | null;
+  activeDeviceId?: string | null;
+  isSessionActive?: boolean;
   createdAt: string;
 }
 
@@ -62,7 +69,11 @@ export default function DashboardPage() {
   const [historyTargetPlayer, setHistoryTargetPlayer] = useState<UserItem | null>(null);
   const [historyDialogOpen, setHistoryDialogOpen] = useState(false);
 
+  const [resetTargetPlayer, setResetTargetPlayer] = useState<UserItem | null>(null);
+  const [resetDialogOpen, setResetDialogOpen] = useState(false);
+
   const [statusUpdatingId, setStatusUpdatingId] = useState<string | null>(null);
+  const [unlockingId, setUnlockingId] = useState<string | null>(null);
 
   const fetchUsers = useCallback(async () => {
     setFetching(true);
@@ -110,6 +121,23 @@ export default function DashboardPage() {
     setHistoryDialogOpen(true);
   };
 
+  const openResetPasswordModal = (player: UserItem) => {
+    setResetTargetPlayer(player);
+    setResetDialogOpen(true);
+  };
+
+  const handleUnlockSession = async (player: UserItem) => {
+    setUnlockingId(player.id);
+    try {
+      await api.post(`/api/users/${player.id}/unlock-session`);
+      await fetchUsers();
+    } catch (err) {
+      console.error("Failed to unlock session:", err);
+    } finally {
+      setUnlockingId(null);
+    }
+  };
+
   if (loading || !isAuthenticated) {
     return (
       <div className="flex-1 min-h-screen flex items-center justify-center bg-background">
@@ -144,7 +172,7 @@ export default function DashboardPage() {
               <Gamepad2 className="w-5 h-5 text-primary" />
             </div>
             <div>
-              <h1 className="text-lg font-bold tracking-tight">Six Dice Game</h1>
+              <h1 className="text-lg font-bold tracking-tight">Goodgudi</h1>
               <p className="text-xs text-muted-foreground">Admin Management Portal</p>
             </div>
           </div>
@@ -384,28 +412,46 @@ export default function DashboardPage() {
                             </div>
                           </TableCell>
 
-                          {/* Active / Inactive Status Toggle */}
+                          {/* Active / Inactive Status Toggle & Single Device Indicator */}
                           <TableCell>
-                            <div className="flex items-center gap-2">
-                              <Switch
-                                checked={isActive}
-                                onCheckedChange={() => handleToggleStatus(p)}
-                                disabled={isUpdatingThis}
-                                size="sm"
-                              />
-                              {isActive ? (
-                                <Badge className="bg-emerald-500/10 text-emerald-400 border-emerald-500/20 text-[11px] font-normal gap-1 py-0.5">
-                                  <UserCheck className="w-3 h-3" />
-                                  Active
-                                </Badge>
+                            <div className="space-y-1.5">
+                              <div className="flex items-center gap-2">
+                                <Switch
+                                  checked={isActive}
+                                  onCheckedChange={() => handleToggleStatus(p)}
+                                  disabled={isUpdatingThis}
+                                  size="sm"
+                                />
+                                {isActive ? (
+                                  <Badge className="bg-emerald-500/10 text-emerald-400 border-emerald-500/20 text-[11px] font-normal gap-1 py-0.5">
+                                    <UserCheck className="w-3 h-3" />
+                                    Active
+                                  </Badge>
+                                ) : (
+                                  <Badge
+                                    variant="secondary"
+                                    className="text-[11px] font-normal text-muted-foreground gap-1 py-0.5"
+                                  >
+                                    <UserX className="w-3 h-3" />
+                                    Inactive
+                                  </Badge>
+                                )}
+                              </div>
+
+                              {/* Single-Device Status Indicator */}
+                              {p.isSessionActive ? (
+                                <div className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-[10px] text-emerald-300 font-mono">
+                                  <span className="relative flex h-2 w-2">
+                                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                                    <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                                  </span>
+                                  <span>In-Game ({p.activeDeviceId || "Phone"})</span>
+                                </div>
                               ) : (
-                                <Badge
-                                  variant="secondary"
-                                  className="text-[11px] font-normal text-muted-foreground gap-1 py-0.5"
-                                >
-                                  <UserX className="w-3 h-3" />
-                                  Inactive
-                                </Badge>
+                                <div className="text-[10px] text-muted-foreground flex items-center gap-1">
+                                  <span className="w-1.5 h-1.5 rounded-full bg-muted-foreground/40 inline-block"></span>
+                                  <span>No Active Device</span>
+                                </div>
                               )}
                             </div>
                           </TableCell>
@@ -413,6 +459,31 @@ export default function DashboardPage() {
                           {/* Actions */}
                           <TableCell className="text-right">
                             <div className="flex items-center justify-end gap-2">
+                              {p.isSessionActive && (
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => handleUnlockSession(p)}
+                                  disabled={unlockingId === p.id}
+                                  className="h-8 gap-1.5 text-xs font-medium border-rose-500/30 hover:bg-rose-500/10 hover:text-rose-400 text-rose-300"
+                                  title="Force unlock device session to allow login on another phone"
+                                >
+                                  <Smartphone className={`w-3.5 h-3.5 text-rose-400 ${unlockingId === p.id ? "animate-pulse" : ""}`} />
+                                  {unlockingId === p.id ? "Unlocking..." : "Unlock Device"}
+                                </Button>
+                              )}
+
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => openResetPasswordModal(p)}
+                                className="h-8 gap-1.5 text-xs font-medium border-amber-500/30 hover:bg-amber-500/10 hover:text-amber-400 text-amber-300"
+                                title="Set / Reset player password"
+                              >
+                                <KeyRound className="w-3.5 h-3.5 text-amber-400" />
+                                Reset Password
+                              </Button>
+
                               <Button
                                 variant="outline"
                                 size="sm"
@@ -459,6 +530,14 @@ export default function DashboardPage() {
         player={historyTargetPlayer}
         open={historyDialogOpen}
         onOpenChange={setHistoryDialogOpen}
+      />
+
+      {/* Reset Password Modal */}
+      <ResetPasswordDialog
+        player={resetTargetPlayer}
+        open={resetDialogOpen}
+        onOpenChange={setResetDialogOpen}
+        onSuccess={fetchUsers}
       />
     </main>
   );

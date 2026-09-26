@@ -5,6 +5,7 @@ import { GLView } from 'expo-gl';
 import type { ExpoWebGLRenderingContext } from 'expo-gl';
 import * as THREE from 'three';
 import * as ExpoTHREE from 'expo-three';
+import { RoundedBoxGeometry } from 'three-stdlib';
 import { getTargetRotation } from '../game/diceOrientations';
 import { useGameStore } from '../store/gameStore';
 import { useGameAudio } from '../hooks/useGameAudio';
@@ -33,23 +34,30 @@ const DELAYS = [0, 80, 160, 50, 130, 210];
 function createDieMesh(textures?: THREE.Texture[]): THREE.Group {
   const group = new THREE.Group();
   const SIZE = 0.58;
-  const geo = new THREE.BoxGeometry(SIZE, SIZE, SIZE, 2, 2, 2);
+  const CORNER_RADIUS = 0.075; // Modern rounded casino dice corner radius
+  const SEGMENTS = 4; // Smooth rounded bevel curvature
 
-  // 1. Solid opaque pure white dice cube body
+  // 1. Sleek, high-gloss modern ivory-white dice body with smooth rounded corners
+  const geo = new RoundedBoxGeometry(SIZE, SIZE, SIZE, SEGMENTS, CORNER_RADIUS);
+  geo.computeVertexNormals();
+
   const bodyMat = new THREE.MeshPhongMaterial({
     color: 0xffffff,
-    shininess: 100,
+    emissive: 0x0a0c1a, // Subtle depth tone so faces never look dull
     specular: new THREE.Color(0xffffff),
+    shininess: 130, // Modern glossy acrylic finish on rounded edges
   });
   const cube = new THREE.Mesh(geo, bodyMat);
   cube.castShadow = true;
   cube.receiveShadow = true;
   group.add(cube);
 
-  // 2. Attach crisp PNG face decals onto the 6 solid white faces
+  // 2. High-contrast, crystal-clear face decals
   if (textures && textures.length === 6) {
-    const decalGeo = new THREE.PlaneGeometry(SIZE * 0.82, SIZE * 0.82);
-    const OFFSET = SIZE / 2 + 0.002;
+    // Sized to fit prominent and flat within the rounded face boundary
+    const DECAL_SIZE = SIZE * 0.78;
+    const decalGeo = new THREE.PlaneGeometry(DECAL_SIZE, DECAL_SIZE);
+    const OFFSET = SIZE / 2 + 0.003; // Just proud of surface to ensure zero z-fighting
 
     const faceConfigs = [
       // Face 1: +Z (Front) - Bat
@@ -116,6 +124,12 @@ function easeInOut(t: number): number {
   return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
 }
 
+// Quintic smootherstep for buttery smooth zero-jerk convergence
+function smootherstep(t: number): number {
+  const c = Math.max(0, Math.min(1, t));
+  return c * c * c * (c * (c * 6 - 15) + 10);
+}
+
 const DiceGrid: React.FC = () => {
   const { diceResults, serverPhase, rollCount, rollTimeSeconds, onDiceLanded } = useGameStore();
   const { playLand, playRoll } = useGameAudio();
@@ -142,6 +156,8 @@ const DiceGrid: React.FC = () => {
   diceResultsRef.current = diceResults;
   const rollTimeSecRef = useRef(rollTimeSeconds);
   rollTimeSecRef.current = rollTimeSeconds;
+  const serverPhaseRef = useRef(serverPhase);
+  serverPhaseRef.current = serverPhase;
 
   type AnimState = {
     targetRot: [number, number, number];
@@ -153,6 +169,17 @@ const DiceGrid: React.FC = () => {
     launchDuration: number;
     rollDuration: number;
     settleDuration: number;
+    // Dynamic physics / wandering parameters:
+    scatterTarget: [number, number, number];
+    wanderFreqX: number;
+    wanderFreqZ: number;
+    wanderAmpX: number;
+    wanderAmpZ: number;
+    phaseX: number;
+    phaseZ: number;
+    bounceFreq: number;
+    bounceAmp: number;
+    bouncePhase: number;
   };
 
   const animStatesRef = useRef<Array<AnimState>>(
@@ -163,15 +190,89 @@ const DiceGrid: React.FC = () => {
       duration: 1400,
       phase: 'idle',
       totalRollDuration: 8000,
-      launchDuration: 800,
+      launchDuration: 850,
       rollDuration: 6400,
-      settleDuration: 800,
+      settleDuration: 750,
+      scatterTarget: [0, 0, 0],
+      wanderFreqX: 1,
+      wanderFreqZ: 1,
+      wanderAmpX: 0.4,
+      wanderAmpZ: 0.1,
+      phaseX: 0,
+      phaseZ: 0,
+      bounceFreq: 5,
+      bounceAmp: 0.55,
+      bouncePhase: 0,
     }))
   );
 
   const rafRef = useRef<number | null>(null);
   const landedCountRef = useRef(0);
   const prevServerPhaseRef = useRef(serverPhase);
+  const prevRollCountRef = useRef(rollCount);
+
+  // Modular roll initiator with randomized scatter & trajectory generation
+  const startRollAnimation = useCallback((results: typeof diceResults, totalDurationMs?: number) => {
+    landedCountRef.current = 0;
+    playRollRef.current();
+
+    const HAND_POS = handPosRef.current;
+    const now = performance.now();
+    const totalRollMs = Math.max(3000, totalDurationMs || (rollTimeSecRef.current || 8) * 1000);
+    const launchDuration = Math.min(850, Math.floor(totalRollMs * 0.12));
+    const settleDuration = Math.min(750, Math.floor(totalRollMs * 0.10));
+    const rollDuration = totalRollMs - launchDuration - settleDuration;
+
+    results.forEach((d, idx) => {
+      const delay = DELAYS[idx] ?? 0;
+      const targetRot = getTargetRotation(d.value);
+      const spinCount = Math.max(8, Math.floor(rollDuration / 380));
+
+      const extraX = (spinCount + (idx % 3) + 3) * Math.PI * 2;
+      const extraY = (spinCount + ((idx * 2) % 4) + 2) * Math.PI * 2;
+      const extraZ = (Math.floor(spinCount / 2) + ((idx + 1) % 3) + 1) * Math.PI * 2;
+
+      // Unique scatter target on the table felt when thrown
+      const scatterSpreadX = (idx - 2.5) * 0.72 + (Math.random() - 0.5) * 0.45;
+      const clampedScatterX = Math.max(-2.15, Math.min(2.15, scatterSpreadX));
+      const scatterY = (Math.random() - 0.5) * 0.20;
+      const scatterZ = (Math.random() - 0.5) * 0.18;
+      const scatterTarget: [number, number, number] = [clampedScatterX, scatterY, scatterZ];
+
+      animStatesRef.current[idx] = {
+        targetRot,
+        spinRot: [targetRot[0] + extraX, targetRot[1] + extraY, targetRot[2] + extraZ],
+        startTime: now + delay,
+        duration: launchDuration,
+        phase: 'launch',
+        totalRollDuration: totalRollMs,
+        launchDuration,
+        rollDuration: Math.max(1500, rollDuration - delay),
+        settleDuration,
+        scatterTarget,
+        wanderFreqX: 1.1 + Math.random() * 0.8,
+        wanderFreqZ: 0.9 + Math.random() * 0.8,
+        wanderAmpX: 0.35 + Math.random() * 0.25,
+        wanderAmpZ: 0.10 + Math.random() * 0.08,
+        phaseX: Math.random() * Math.PI * 2,
+        phaseZ: Math.random() * Math.PI * 2,
+        bounceFreq: Math.max(4, Math.floor(rollDuration / 950)) + Math.random() * 0.5,
+        bounceAmp: 0.50 + Math.random() * 0.20,
+        bouncePhase: Math.random() * 0.6,
+      };
+
+      const die = diceGroupsRef.current[idx];
+      if (die) {
+        die.visible = delay === 0;
+        die.position.set(HAND_POS[0], HAND_POS[1], HAND_POS[2]);
+        die.scale.setScalar(0.3);
+      }
+      const shadow = shadowDiscsRef.current[idx];
+      if (shadow) {
+        shadow.visible = false;
+      }
+    });
+  }, []);
 
   const onContextCreate = useCallback(async (gl: ExpoWebGLRenderingContext) => {
     const canvasMock = {
@@ -213,16 +314,21 @@ const DiceGrid: React.FC = () => {
     camera.lookAt(0, 0, 0);
     cameraRef.current = camera;
 
-    // Bright neutral white lights for crystal clear white dice
-    const keyLight = new THREE.DirectionalLight(0xffffff, 2.8);
-    keyLight.position.set(0, 6, 5);
+    // Balanced studio lighting for modern glossy dice with crystal clear face visibility
+    const keyLight = new THREE.DirectionalLight(0xffffff, 2.4);
+    keyLight.position.set(2, 6, 5);
     scene.add(keyLight);
 
-    const fillLight = new THREE.DirectionalLight(0xffffff, 1.6);
+    const fillLight = new THREE.DirectionalLight(0xf1f5f9, 1.4);
     fillLight.position.set(-4, 2, 4);
     scene.add(fillLight);
 
-    const ambient = new THREE.AmbientLight(0xffffff, 1.6);
+    // Modern rim light that glints across the rounded corner edges as dice roll
+    const rimLight = new THREE.DirectionalLight(0x38bdf8, 0.8);
+    rimLight.position.set(0, -4, 4);
+    scene.add(rimLight);
+
+    const ambient = new THREE.AmbientLight(0xffffff, 1.5);
     scene.add(ambient);
 
     // Preload consistent PNG dice face textures
@@ -246,6 +352,11 @@ const DiceGrid: React.FC = () => {
             const tex = await (ExpoTHREE as any).loadAsync(uri, undefined, { renderer: rendererRef.current });
             if (tex) {
               tex.generateMipmaps = true;
+              tex.minFilter = THREE.LinearMipmapLinearFilter;
+              tex.magFilter = THREE.LinearFilter;
+              if ((THREE as any).SRGBColorSpace) {
+                tex.colorSpace = (THREE as any).SRGBColorSpace;
+              }
               textures.push(tex as THREE.Texture);
             }
           } catch {
@@ -264,20 +375,28 @@ const DiceGrid: React.FC = () => {
     const initScene = (textures?: THREE.Texture[]) => {
       diceGroupsRef.current = [];
       shadowDiscsRef.current = [];
+      const currentPhase = serverPhaseRef.current;
 
       DICE_POSITIONS.forEach((pos, idx) => {
         const shadow = createShadowDisc();
         shadow.rotation.x = -Math.PI / 2;
         shadow.position.set(pos[0], pos[1] - 0.35, pos[2] - 0.05);
-        shadow.visible = false; // Initially hidden during betting open
+        shadow.visible = currentPhase === 'SETTLED';
         scene.add(shadow);
         shadowDiscsRef.current.push(shadow);
 
         const die = createDieMesh(textures);
         const HAND_POS = handPosRef.current;
-        die.position.set(HAND_POS[0], HAND_POS[1], HAND_POS[2]);
-        die.scale.setScalar(0.3);
-        die.visible = false; // Hidden at dealer hand until rolling begins
+        if (currentPhase === 'SETTLED') {
+          die.position.set(pos[0], pos[1], pos[2]);
+          die.scale.setScalar(1.0);
+          die.visible = true;
+          animStatesRef.current[idx].phase = 'done';
+        } else {
+          die.position.set(HAND_POS[0], HAND_POS[1], HAND_POS[2]);
+          die.scale.setScalar(0.3);
+          die.visible = false;
+        }
 
         const initialVal = diceResultsRef.current[idx]?.value ?? (idx + 1);
         const [rx, ry, rz] = getTargetRotation(initialVal);
@@ -286,6 +405,10 @@ const DiceGrid: React.FC = () => {
         scene.add(die);
         diceGroupsRef.current.push(die);
       });
+
+      if (currentPhase === 'ROLLING') {
+        startRollAnimation(diceResultsRef.current);
+      }
 
       // Continuous Render Loop
       const render = () => {
@@ -301,24 +424,37 @@ const DiceGrid: React.FC = () => {
 
           if (a.phase === 'launch') {
             const elapsed = now - a.startTime;
+            if (elapsed < 0) {
+              // Wait for individual staggered toss delay
+              die.visible = false;
+              if (shadow) shadow.visible = false;
+              return;
+            }
+            die.visible = true;
+
             const t = Math.min(Math.max(elapsed / a.duration, 0), 1);
             const eased = easeInOut(t);
 
-            // Travel from dealer hand towards table
-            const curX = HAND_POS[0] * (1 - eased) + basePos[0] * eased;
-            const curY = HAND_POS[1] * (1 - eased) + (basePos[1] + 0.6) * eased;
-            const curZ = HAND_POS[2] * (1 - eased) + basePos[2] * eased;
+            // Parabolic toss arc from dealer's hand to randomized scatter destination
+            const tossArc = Math.sin(t * Math.PI) * 0.65;
+            const curX = HAND_POS[0] * (1 - eased) + a.scatterTarget[0] * eased;
+            const curY = HAND_POS[1] * (1 - eased) + a.scatterTarget[1] * eased + tossArc;
+            const curZ = HAND_POS[2] * (1 - eased) + a.scatterTarget[2] * eased;
             die.position.set(curX, curY, curZ);
 
             const scale = 0.3 * (1 - eased) + 1.0 * eased;
             die.scale.setScalar(scale);
 
-            die.rotation.x += 0.15;
-            die.rotation.y += 0.18;
+            die.rotation.x += 0.20;
+            die.rotation.y += 0.24;
+            die.rotation.z += 0.10;
 
             if (shadow) {
               shadow.visible = true;
-              shadow.scale.setScalar(eased * 0.7);
+              shadow.position.set(curX, -0.35, curZ - 0.05);
+              const shadowScale = eased * (1.0 - tossArc * 0.35);
+              shadow.scale.setScalar(Math.max(0.2, shadowScale));
+              (shadow.material as THREE.MeshBasicMaterial).opacity = 0.38 * eased;
             }
 
             if (t >= 1) {
@@ -329,25 +465,66 @@ const DiceGrid: React.FC = () => {
           } else if (a.phase === 'rolling') {
             const elapsed = now - a.startTime;
             const t = Math.min(Math.max(elapsed / a.duration, 0), 1);
-            const eased = easeInOut(t);
 
+            // 1. Organic rolling movement wandering across the table felt
+            const wTime = elapsed * 0.003;
+            const wanderX = Math.sin(wTime * a.wanderFreqX + a.phaseX) * a.wanderAmpX
+                          + Math.cos(wTime * a.wanderFreqX * 0.55 + a.phaseX) * (a.wanderAmpX * 0.45);
+            const wanderZ = Math.sin(wTime * a.wanderFreqZ + a.phaseZ) * a.wanderAmpZ;
+
+            const freeX = Math.max(-2.3, Math.min(2.3, a.scatterTarget[0] + wanderX));
+            const freeZ = Math.max(-0.25, Math.min(0.25, a.scatterTarget[2] + wanderZ));
+
+            // 2. Realistic tumbling bouncing with progressive energy decay
+            const energy = Math.max(0.08, (1 - t * 0.78));
+            const bounceFactor = Math.abs(Math.sin(t * Math.PI * a.bounceFreq + a.bouncePhase)) * energy;
+            const bounceY = bounceFactor * a.bounceAmp;
+
+            // 3. Smooth Convergence to designated position as roll is about to complete:
+            // At 62% of rolling time, the die begins smoothly steering into its final basePos slot!
+            const convergenceStart = 0.62;
+            let blend = 0;
+            if (t > convergenceStart) {
+              const u = (t - convergenceStart) / (1.0 - convergenceStart);
+              // Quintic smootherstep produces seamless zero-jerk arrival at basePos
+              blend = smootherstep(u);
+            }
+
+            const curX = freeX * (1 - blend) + basePos[0] * blend;
+            const curZ = freeZ * (1 - blend) + basePos[2] * blend;
+            const tableSurfaceY = a.scatterTarget[1] * (1 - blend) + basePos[1] * blend;
+            // Micro-hops diminish as die settles into its position
+            const curY = tableSurfaceY + bounceY * (1 - blend * 0.72);
+
+            die.position.set(curX, curY, curZ);
+
+            // 4. Real-time dynamic drop shadow tracking under the moving die
+            if (shadow) {
+              shadow.visible = true;
+              shadow.position.set(curX, -0.35, curZ - 0.05);
+              const heightAboveFloor = Math.max(0, curY);
+              const shadowScale = Math.max(0.55, 1.0 - heightAboveFloor * 0.40);
+              shadow.scale.setScalar(shadowScale);
+              (shadow.material as THREE.MeshBasicMaterial).opacity = Math.max(0.16, 0.38 - heightAboveFloor * 0.18);
+            }
+
+            // 5. 3D Rotation tumbling and deceleration into target face
             const [tx, ty, tz] = a.targetRot;
             const [sx, sy, sz] = a.spinRot;
 
-            die.rotation.x = sx * (1 - eased) + tx * eased;
-            die.rotation.y = sy * (1 - eased) + ty * eased;
-            die.rotation.z = sz * (1 - eased) + tz * eased;
-
-            // Tumbling bounce height trajectory spanning the entire roll duration
-            const bounceHumps = Math.max(3, Math.floor(a.duration / 1800));
-            const bounceFactor = Math.abs(Math.sin(t * Math.PI * bounceHumps)) * (1 - t * 0.5);
-            const arcY = bounceFactor * 0.65;
-            die.position.set(basePos[0], basePos[1] + arcY, basePos[2]);
-
-            if (shadow) {
-              const shadowScale = 1.0 - bounceFactor * 0.35;
-              shadow.scale.setScalar(shadowScale);
+            let rotProgress: number;
+            if (t <= convergenceStart) {
+              rotProgress = (t / convergenceStart) * 0.68;
+            } else {
+              const u = (t - convergenceStart) / (1.0 - convergenceStart);
+              // Cubic ease-out deceleration into target rotation
+              const easeOutCubic = 1 - Math.pow(1 - u, 3);
+              rotProgress = 0.68 + 0.32 * easeOutCubic;
             }
+
+            die.rotation.x = sx * (1 - rotProgress) + tx * rotProgress;
+            die.rotation.y = sy * (1 - rotProgress) + ty * rotProgress;
+            die.rotation.z = sz * (1 - rotProgress) + tz * rotProgress;
 
             if (t >= 1) {
               a.phase = 'settling';
@@ -357,11 +534,19 @@ const DiceGrid: React.FC = () => {
           } else if (a.phase === 'settling') {
             const elapsed = now - a.startTime;
             const t = Math.min(elapsed / a.duration, 1);
-            const bounce = (1 - easeOutBounce(t)) * 0.14;
+            const bounce = (1 - easeOutBounce(t)) * 0.10;
 
             die.position.set(basePos[0], basePos[1] + bounce, basePos[2]);
             const [tx, ty, tz] = a.targetRot;
             die.rotation.set(tx, ty, tz);
+
+            if (shadow) {
+              shadow.visible = true;
+              shadow.position.set(basePos[0], -0.35, basePos[2] - 0.05);
+              const shadowScale = 1.0 - bounce * 0.4;
+              shadow.scale.setScalar(shadowScale);
+              (shadow.material as THREE.MeshBasicMaterial).opacity = 0.38;
+            }
 
             if (t >= 1) {
               a.phase = 'done';
@@ -370,6 +555,7 @@ const DiceGrid: React.FC = () => {
               if (shadow) {
                 shadow.scale.setScalar(1.0);
                 shadow.visible = true;
+                (shadow.material as THREE.MeshBasicMaterial).opacity = 0.38;
               }
 
               landedCountRef.current += 1;
@@ -385,18 +571,20 @@ const DiceGrid: React.FC = () => {
 
             // Fly back to dealer hand and scale down
             const curX = basePos[0] * (1 - eased) + HAND_POS[0] * eased;
-            const curY = basePos[1] * (1 - eased) + HAND_POS[1] * eased;
+            const curY = basePos[1] * (1 - eased) + HAND_POS[1] * eased + Math.sin(t * Math.PI) * 0.35;
             const curZ = basePos[2] * (1 - eased) + HAND_POS[2] * eased;
             die.position.set(curX, curY, curZ);
 
             const scale = 1.0 * (1 - eased) + 0.3 * eased;
             die.scale.setScalar(scale);
 
-            die.rotation.x += 0.1;
-            die.rotation.y += 0.15;
+            die.rotation.x += 0.12;
+            die.rotation.y += 0.16;
 
             if (shadow) {
-              shadow.scale.setScalar(1 - eased);
+              shadow.position.set(curX, -0.35, curZ - 0.05);
+              shadow.scale.setScalar(Math.max(0.1, 1 - eased));
+              (shadow.material as THREE.MeshBasicMaterial).opacity = Math.max(0, 0.35 * (1 - eased));
             }
 
             if (t >= 1) {
@@ -411,7 +599,12 @@ const DiceGrid: React.FC = () => {
             die.rotation.set(tx, ty, tz);
             die.position.set(basePos[0], basePos[1], basePos[2]);
             die.visible = true;
-            if (shadow) shadow.visible = true;
+            if (shadow) {
+              shadow.visible = true;
+              shadow.position.set(basePos[0], -0.35, basePos[2] - 0.05);
+              shadow.scale.setScalar(1.0);
+              (shadow.material as THREE.MeshBasicMaterial).opacity = 0.38;
+            }
           } else if (a.phase === 'idle') {
             die.visible = false;
             if (shadow) shadow.visible = false;
@@ -428,53 +621,21 @@ const DiceGrid: React.FC = () => {
     };
 
     loadTextures().then(initScene).catch(() => initScene(undefined));
-  }, []);
+  }, [startRollAnimation]);
 
   // Handle phase changes (Launch when ROLLING, Collect when BETTING_OPEN)
   useEffect(() => {
     const prevPhase = prevServerPhaseRef.current;
     prevServerPhaseRef.current = serverPhase;
-    const HAND_POS = handPosRef.current;
+    const prevRollCount = prevRollCountRef.current;
+    prevRollCountRef.current = rollCount;
     const now = performance.now();
 
-    if (serverPhase === 'ROLLING' && prevPhase !== 'ROLLING') {
-      // 1. Launch dice from dealer's hand onto table for the entire roll duration
-      landedCountRef.current = 0;
-      playRollRef.current();
+    const isNewRoll = (serverPhase === 'ROLLING' && prevPhase !== 'ROLLING') ||
+                      (serverPhase === 'ROLLING' && rollCount !== prevRollCount);
 
-      const totalRollMs = Math.max(3000, (rollTimeSecRef.current || 8) * 1000);
-      const launchDuration = Math.min(1000, Math.floor(totalRollMs * 0.14));
-      const settleDuration = Math.min(800, Math.floor(totalRollMs * 0.12));
-      const rollDuration = totalRollMs - launchDuration - settleDuration;
-
-      diceResults.forEach((d, idx) => {
-        const delay = DELAYS[idx] ?? 0;
-        const targetRot = getTargetRotation(d.value);
-        const spinCount = Math.max(6, Math.floor(rollDuration / 450));
-
-        const extraX = (spinCount + (idx % 3) + 2) * Math.PI * 2;
-        const extraY = (spinCount + (idx % 2) + 2) * Math.PI * 2;
-        const extraZ = (Math.floor(spinCount / 2) + 1) * Math.PI * 2;
-
-        animStatesRef.current[idx] = {
-          targetRot,
-          spinRot: [targetRot[0] + extraX, targetRot[1] + extraY, targetRot[2] + extraZ],
-          startTime: now + delay,
-          duration: launchDuration,
-          phase: 'launch',
-          totalRollDuration: totalRollMs,
-          launchDuration,
-          rollDuration: rollDuration - delay,
-          settleDuration,
-        };
-
-        const die = diceGroupsRef.current[idx];
-        if (die) {
-          die.visible = true;
-          die.position.set(HAND_POS[0], HAND_POS[1], HAND_POS[2]);
-          die.scale.setScalar(0.3);
-        }
-      });
+    if (isNewRoll) {
+      startRollAnimation(diceResults);
     } else if (serverPhase === 'BETTING_OPEN' && (prevPhase === 'SETTLED' || prevPhase === 'ROLLING')) {
       // 2. Animate dice collecting back to dealer's hand and disappear
       diceGroupsRef.current.forEach((die, idx) => {
@@ -482,7 +643,7 @@ const DiceGrid: React.FC = () => {
           animStatesRef.current[idx] = {
             ...animStatesRef.current[idx],
             startTime: now,
-            duration: 400 + idx * 20,
+            duration: 400 + idx * 25,
             phase: 'collect',
           };
         } else {
@@ -490,7 +651,7 @@ const DiceGrid: React.FC = () => {
         }
       });
     }
-  }, [serverPhase, rollCount, diceResults]);
+  }, [serverPhase, rollCount, diceResults, startRollAnimation]);
 
   useEffect(() => {
     mountedRef.current = true;

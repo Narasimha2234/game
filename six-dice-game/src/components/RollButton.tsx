@@ -17,6 +17,7 @@ const RollButton: React.FC = () => {
     phase,
     serverPhase,
     mode,
+    stopMessage,
     hapticEnabled,
     placeBet,
     isPlacingBet,
@@ -103,6 +104,11 @@ const RollButton: React.FC = () => {
           </LinearGradient>
         </Pressable>
       </View>
+      {mode === 'STOPPED' && (
+        <Text style={styles.stoppedSubtext} numberOfLines={1}>
+          📢 {stopMessage || 'Game paused by admin'}
+        </Text>
+      )}
     </View>
   );
 };
@@ -164,6 +170,14 @@ const styles = StyleSheet.create({
   },
   labelDisabled: {
     color: 'rgba(255,255,255,0.6)',
+  },
+  stoppedSubtext: {
+    color: '#fda4af',
+    fontSize: 10,
+    fontFamily: 'Outfit_600SemiBold',
+    marginTop: 4,
+    textAlign: 'center',
+    paddingHorizontal: 8,
   },
 });
 

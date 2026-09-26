@@ -10,7 +10,22 @@ export const STORAGE_KEYS = {
   REFRESH_TOKEN: '@six_dice_refresh_token',
   USER_DATA: '@six_dice_user_data',
   API_BASE_URL: '@six_dice_api_url',
+  SESSION_ID: '@six_dice_session_id',
+  DEVICE_ID: '@six_dice_device_id',
 };
+
+export async function getOrCreateDeviceId(): Promise<string> {
+  try {
+    let id = await AsyncStorage.getItem(STORAGE_KEYS.DEVICE_ID);
+    if (!id) {
+      id = `dev_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+      await AsyncStorage.setItem(STORAGE_KEYS.DEVICE_ID, id);
+    }
+    return id;
+  } catch {
+    return 'device_fallback';
+  }
+}
 
 export function getBackendBaseUrl(): string {
   // 1. If running in Expo Go on mobile, hostUri contains the computer's local IP (e.g. "192.168.0.101:8081")

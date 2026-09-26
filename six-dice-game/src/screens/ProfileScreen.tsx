@@ -21,7 +21,7 @@ const ProfileScreen: React.FC = () => {
   const handleLogout = () => {
     Alert.alert(
       'Sign Out',
-      'Are you sure you want to log out of Six Dice Game?',
+      'Are you sure you want to log out of Goodgudi?',
       [
         { text: 'Cancel', style: 'cancel' },
         {
@@ -92,7 +92,7 @@ const ProfileScreen: React.FC = () => {
             <Text style={styles.walletAmount}>
               ₹{Number(walletBalance).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
             </Text>
-            <Text style={styles.walletSubtext}>Available for bets in Hex Roll 3D</Text>
+            <Text style={styles.walletSubtext}>Available for bets in Goodgudi</Text>
           </View>
 
           {/* Account Details Section */}

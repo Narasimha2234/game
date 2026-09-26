@@ -18,6 +18,7 @@ import HostCountdownCards from '../components/HostCountdownCards';
 import DiceGrid from '../components/DiceGrid';
 import BettingControlPanel from '../components/BettingControlPanel';
 import RollButton from '../components/RollButton';
+import ParticleField from '../components/ParticleField';
 import { useGameStore } from '../store/gameStore';
 import { useAuthStore } from '../store/authStore';
 
@@ -48,6 +49,8 @@ export default function GameScreen() {
     hapticEnabled,
     serverPhase,
     timeLeft,
+    mode,
+    stopMessage,
   } = useGameStore();
   const { user, walletBalance } = useAuthStore();
 
@@ -82,6 +85,19 @@ export default function GameScreen() {
   const hasWon = lastRoundUserResult?.hasWon ?? false;
   const wonAmount = lastRoundUserResult?.totalWon ?? 0;
   const betAmount = lastRoundUserResult?.totalBet ?? 0;
+
+  // Trigger celebratory or empathetic haptics when result modal pops up
+  useEffect(() => {
+    if (winModalVisible && lastRoundUserResult !== null) {
+      if (hapticEnabled && Platform.OS !== 'web') {
+        if (hasWon) {
+          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        } else {
+          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+        }
+      }
+    }
+  }, [winModalVisible, lastRoundUserResult, hasWon, hapticEnabled]);
 
   return (
     <View style={styles.root}>
@@ -142,9 +158,12 @@ export default function GameScreen() {
               colors={
                 hasWon
                   ? ['#1e1b4b', '#0f172a', '#090d1f']
-                  : ['#2e1065', '#0f172a', '#080b18']
+                  : ['#1e2238', '#0f172a', '#080b18']
               }
-              style={styles.modalCard}
+              style={[
+                styles.modalCard,
+                hasWon ? styles.modalCardWin : styles.modalCardLose,
+              ]}
             >
               {/* Header Game Image Badge */}
               <View
@@ -173,7 +192,7 @@ export default function GameScreen() {
                   hasWon ? styles.textGold : styles.textLight,
                 ]}
               >
-                {hasWon ? 'CONGRATULATIONS!' : 'ROUND COMPLETED'}
+                {hasWon ? '🎉 CONGRATULATIONS! 🎉' : 'BETTER LUCK NEXT TIME!'}
               </Text>
 
               {/* Result Dice Roll PNG Images */}
@@ -208,7 +227,7 @@ export default function GameScreen() {
                   <>
                     <Text style={styles.amountLabel}>BET AMOUNT</Text>
                     <Text style={styles.amountValueLose}>-₹{betAmount}</Text>
-                    <Text style={styles.amountSubtext}>Better luck in the next round!</Text>
+                    <Text style={styles.amountSubtext}>Better luck next round! Your big win is coming!</Text>
                   </>
                 )}
               </View>
@@ -263,10 +282,57 @@ export default function GameScreen() {
                   <Text style={styles.modalCtaText}>
                     {hasWon
                       ? `COLLECT & CONTINUE (${timeLeft}s)`
-                      : `NEXT ROUND (${timeLeft}s)`}
+                      : `TRY AGAIN (${timeLeft}s)`}
                   </Text>
                 </LinearGradient>
               </TouchableOpacity>
+            </LinearGradient>
+
+            {/* Crisp celebratory confetti rendered on top of screen and modal ONLY for winning players */}
+            {hasWon && <ParticleField count={65} />}
+          </View>
+        </Modal>
+
+        {/* Game Stopped / Admin Pause Notice Modal (Shows Admin's Custom Reason) */}
+        <Modal
+          visible={mode === 'STOPPED'}
+          transparent
+          animationType="fade"
+        >
+          <View style={styles.stoppedModalBackdrop}>
+            <LinearGradient
+              colors={['#2a1224', '#190a1b', '#0d0411']}
+              style={styles.stoppedModalCard}
+            >
+              {/* Icon Circle */}
+              <View style={styles.stoppedIconCircle}>
+                <Text style={styles.stoppedIconEmoji}>⏸️</Text>
+              </View>
+
+              {/* Status Pill */}
+              <View style={styles.stoppedPill}>
+                <View style={styles.stoppedPulseDot} />
+                <Text style={styles.stoppedPillText}>ADMIN ANNOUNCEMENT</Text>
+              </View>
+
+              {/* Title */}
+              <Text style={styles.stoppedTitle}>GAME TEMPORARILY PAUSED</Text>
+
+              {/* Admin Custom Message Box */}
+              <View style={styles.stoppedMessageBox}>
+                <Text style={styles.stoppedQuote}>“</Text>
+                <Text style={styles.stoppedMessageText}>
+                  {stopMessage || 'Game is temporarily paused by admin. Please check back shortly.'}
+                </Text>
+                <Text style={styles.stoppedQuote}>”</Text>
+              </View>
+
+              {/* Explanatory Footer */}
+              <View style={styles.stoppedFooterBox}>
+                <Text style={styles.stoppedFooterText}>
+                  All bets and dice rolling are currently on hold. The game will automatically resume once the admin reopens the room.
+                </Text>
+              </View>
             </LinearGradient>
           </View>
         </Modal>
@@ -323,6 +389,14 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.5,
     shadowRadius: 20,
     elevation: 12,
+  },
+  modalCardWin: {
+    borderColor: 'rgba(234, 179, 8, 0.55)',
+    shadowColor: '#eab308',
+  },
+  modalCardLose: {
+    borderColor: 'rgba(99, 102, 241, 0.35)',
+    shadowColor: '#3b82f6',
   },
   iconCircle: {
     width: 68,
@@ -524,5 +598,112 @@ const styles = StyleSheet.create({
     fontFamily: 'Outfit_700Bold',
     fontWeight: '700',
     letterSpacing: 1,
+  },
+
+  // Stopped Modal Styles
+  stoppedModalBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.88)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 24,
+  },
+  stoppedModalCard: {
+    width: '100%',
+    maxWidth: 340,
+    borderRadius: 24,
+    borderWidth: 1.5,
+    borderColor: 'rgba(244, 63, 94, 0.4)',
+    alignItems: 'center',
+    paddingHorizontal: 22,
+    paddingTop: 28,
+    paddingBottom: 24,
+    shadowColor: '#f43f5e',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.6,
+    shadowRadius: 20,
+    elevation: 20,
+  },
+  stoppedIconCircle: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    backgroundColor: 'rgba(244, 63, 94, 0.15)',
+    borderWidth: 2,
+    borderColor: 'rgba(244, 63, 94, 0.4)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 14,
+  },
+  stoppedIconEmoji: {
+    fontSize: 28,
+  },
+  stoppedPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: 'rgba(244, 63, 94, 0.15)',
+    borderWidth: 1,
+    borderColor: 'rgba(244, 63, 94, 0.35)',
+    borderRadius: 12,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    marginBottom: 10,
+  },
+  stoppedPulseDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: '#f43f5e',
+  },
+  stoppedPillText: {
+    color: '#fda4af',
+    fontSize: 9.5,
+    fontFamily: 'Outfit_700Bold',
+    letterSpacing: 0.8,
+  },
+  stoppedTitle: {
+    color: '#ffffff',
+    fontSize: 16,
+    fontFamily: 'Outfit_800ExtraBold',
+    letterSpacing: 0.5,
+    textAlign: 'center',
+    marginBottom: 16,
+  },
+  stoppedMessageBox: {
+    width: '100%',
+    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.12)',
+    borderRadius: 16,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    marginBottom: 16,
+    alignItems: 'center',
+  },
+  stoppedQuote: {
+    color: '#f43f5e',
+    fontSize: 22,
+    fontFamily: 'Outfit_700Bold',
+    lineHeight: 22,
+  },
+  stoppedMessageText: {
+    color: '#fecdd3',
+    fontSize: 13.5,
+    fontFamily: 'Outfit_600SemiBold',
+    textAlign: 'center',
+    lineHeight: 19,
+    marginVertical: 4,
+  },
+  stoppedFooterBox: {
+    width: '100%',
+    paddingHorizontal: 8,
+  },
+  stoppedFooterText: {
+    color: 'rgba(255, 255, 255, 0.5)',
+    fontSize: 10.5,
+    fontFamily: 'Outfit_400Regular',
+    textAlign: 'center',
+    lineHeight: 15,
   },
 });

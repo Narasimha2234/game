@@ -64,6 +64,12 @@ export class GameRound {
   @Column({ type: "int", default: 0 })
   totalPayoutAmount: number;
 
+  @Column({ type: "float", nullable: true, default: null })
+  minProfitPercentage?: number | null;
+
+  @Column({ type: "varchar", length: 500, nullable: true, default: null })
+  stopMessage?: string | null;
+
   @OneToMany(() => GameBet, (bet) => bet.round)
   bets: GameBet[];
 

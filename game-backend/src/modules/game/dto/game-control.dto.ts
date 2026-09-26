@@ -6,5 +6,7 @@ export class GameControlDto {
   rollTimeSeconds?: number;
   intervalTimeSeconds?: number;
   manualDice?: number[];
+  minProfitPercentage?: number | null;
+  stopMessage?: string | null;
   action?: "start" | "stop" | "roll_now" | "next_round";
 }

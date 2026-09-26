@@ -109,10 +109,10 @@ const LoginScreen: React.FC = () => {
               </View>
 
               <View style={styles.titleRow}>
-                <Text style={styles.titleMain}>SIX DICE</Text>
-                <Text style={styles.titleAccent}>GAME</Text>
+                <Text style={styles.titleMain}>GOOD</Text>
+                <Text style={styles.titleAccent}>GUDI</Text>
               </View>
-              <Text style={styles.subtitle}>REAL-TIME 3D CASINO RELIEF</Text>
+              <Text style={styles.subtitle}>REAL-TIME 3D DICE GAME</Text>
             </View>
 
             {/* Login Form Card */}
@@ -410,6 +410,7 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontFamily: 'Outfit_500Medium',
     flex: 1,
+    lineHeight: 16,
   },
   inputGroup: {
     marginBottom: 12,

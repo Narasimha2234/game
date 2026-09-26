@@ -8,24 +8,37 @@ export class AuthController {
   private readonly logger = new Logger(AuthController.name);
 
   @Post('login')
-  async login(@Body() body: { mobile?: string; username?: string; email?: string; password: string }) {
+  async login(@Body() body: {
+    mobile?: string;
+    username?: string;
+    email?: string;
+    password: string;
+    deviceId?: string;
+    sessionId?: string;
+  }) {
     try {
       const identifier = body.mobile || body.username || body.email || '';
-      return await this.authService.login(identifier, body.password);
+      return await this.authService.login(
+        identifier,
+        body.password,
+        body.deviceId,
+        body.sessionId,
+      );
     } catch (error) {
-      // If it's an HTTP exception (like Unauthorized), rethrow so client gets correct status
+      // If it's an HTTP exception (like Unauthorized or Conflict), rethrow so client gets correct status
       if (error instanceof HttpException) throw error;
       this.logger.error('Login error', error instanceof Error ? error.stack : String(error));
       throw new InternalServerErrorException('Login failed, check server logs');
     }
   }
 
-
-  @UseGuards(JwtAuthGuard)
   @Post('logout')
-  async logout(@Req() req: any) {
-    const userId = req.user?.sub;
-    return this.authService.logout(userId);
+  async logout(@Req() req: any, @Body() body: { userId?: string }) {
+    const userId = req.user?.sub || body?.userId;
+    if (userId) {
+      await this.authService.logout(userId);
+    }
+    return { ok: true };
   }
 
   @Post('refresh')

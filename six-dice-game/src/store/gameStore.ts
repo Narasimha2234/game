@@ -48,6 +48,7 @@ export interface GameState {
   betPools: Record<number, { totalAmount: number; bettorsCount: number }>;
   myBets: MyBet[];
   lastRoundUserResult: LastRoundUserResult | null;
+  stopMessage: string | null;
   
   // Local Game & Animation State
   phase: 'idle' | 'rolling' | 'landing' | 'landed' | 'done';
@@ -93,6 +94,7 @@ export const useGameStore = create<GameState>((set, get) => ({
   betPools: {},
   myBets: [],
   lastRoundUserResult: null,
+  stopMessage: null,
 
   phase: 'idle',
   gameState: 'idle',
@@ -117,8 +119,23 @@ export const useGameStore = create<GameState>((set, get) => ({
 
   syncServerState: async (userId?: string) => {
     try {
-      const url = userId ? `/api/game/state?userId=${userId}` : `/api/game/state`;
+      const auth = useAuthStore.getState();
+      const effectiveUserId = userId || auth.user?.id;
+      const sessionId = auth.sessionId;
+
+      const url = effectiveUserId
+        ? `/api/game/state?userId=${effectiveUserId}${sessionId ? `&sessionId=${encodeURIComponent(sessionId)}` : ''}`
+        : `/api/game/state`;
       const res = await apiClient.get(url);
+
+      // Check session validity (single active device check)
+      if (res.data?.sessionValid === false) {
+        await auth.logout();
+        useAuthStore.setState({
+          error: 'Your session has been terminated or logged into another device.',
+        });
+        return;
+      }
 
       if (res.data?.success && res.data.data) {
         const d = res.data.data;
@@ -172,6 +189,7 @@ export const useGameStore = create<GameState>((set, get) => ({
           betPools: d.betPools || {},
           myBets: d.myBets || [],
           lastRoundUserResult: d.lastRoundUserResult,
+          stopMessage: d.stopMessage ?? null,
         });
       }
     } catch (err) {

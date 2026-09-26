@@ -32,7 +32,15 @@ export default function LoginPage() {
   return (
     <main className="flex-1 flex items-center justify-center p-6">
       <form className="w-full max-w-md bg-white/5 backdrop-blur rounded-lg p-6 shadow" onSubmit={(e)=>e.preventDefault()}>
-        <h1 className="text-2xl font-semibold mb-4">Admin Login</h1>
+        <div className="flex items-center gap-3 mb-6">
+          <div className="w-10 h-10 rounded-xl bg-sky-500/10 border border-sky-500/20 flex items-center justify-center text-xl">
+            🎲
+          </div>
+          <div>
+            <h1 className="text-xl font-bold tracking-tight text-white">Goodgudi</h1>
+            <p className="text-xs text-slate-400">Admin Portal Sign In</p>
+          </div>
+        </div>
         {error && <div className="text-sm text-red-400 mb-3">{error}</div>}
         <label className="block mb-2">
           <div className="text-sm mb-1">Username</div>

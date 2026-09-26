@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { apiClient, STORAGE_KEYS } from '../api/client';
+import { Platform } from 'react-native';
+import { apiClient, STORAGE_KEYS, getOrCreateDeviceId } from '../api/client';
 
 export interface UserProfile {
   id: string;
@@ -15,6 +16,7 @@ export interface UserProfile {
 
 interface AuthState {
   user: UserProfile | null;
+  sessionId: string | null;
   isAuthenticated: boolean;
   isLoading: boolean;
   isInitializing: boolean;
@@ -32,6 +34,7 @@ interface AuthState {
 
 export const useAuthStore = create<AuthState>((set, get) => ({
   user: null,
+  sessionId: null,
   isAuthenticated: false,
   isLoading: false,
   isInitializing: true,
@@ -40,15 +43,17 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
   initializeAuth: async () => {
     try {
-      const [token, userDataStr] = await Promise.all([
+      const [token, userDataStr, savedSessionId] = await Promise.all([
         AsyncStorage.getItem(STORAGE_KEYS.ACCESS_TOKEN),
         AsyncStorage.getItem(STORAGE_KEYS.USER_DATA),
+        AsyncStorage.getItem(STORAGE_KEYS.SESSION_ID),
       ]);
 
       if (token && userDataStr) {
         const parsedUser: UserProfile = JSON.parse(userDataStr);
         set({
           user: parsedUser,
+          sessionId: savedSessionId || null,
           isAuthenticated: true,
           walletBalance: Number(parsedUser.walletBalance) || 0,
           isInitializing: false,
@@ -67,12 +72,17 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   login: async (identifier: string, password: string) => {
     set({ isLoading: true, error: null });
     try {
+      const deviceId = await getOrCreateDeviceId();
+      const savedSessionId = get().sessionId || (await AsyncStorage.getItem(STORAGE_KEYS.SESSION_ID));
+
       const response = await apiClient.post('/auth/login', {
         username: identifier.trim(),
         password,
+        deviceId,
+        sessionId: savedSessionId || undefined,
       });
 
-      const { accessToken, refreshToken, user } = response.data;
+      const { accessToken, refreshToken, user, sessionId } = response.data;
 
       if (!accessToken || !user) {
         throw new Error('Invalid response from authentication server');
@@ -83,10 +93,12 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         AsyncStorage.setItem(STORAGE_KEYS.ACCESS_TOKEN, accessToken),
         refreshToken ? AsyncStorage.setItem(STORAGE_KEYS.REFRESH_TOKEN, refreshToken) : Promise.resolve(),
         AsyncStorage.setItem(STORAGE_KEYS.USER_DATA, JSON.stringify(user)),
+        sessionId ? AsyncStorage.setItem(STORAGE_KEYS.SESSION_ID, sessionId) : Promise.resolve(),
       ]);
 
       set({
         user,
+        sessionId: sessionId || null,
         isAuthenticated: true,
         walletBalance: Number(user.walletBalance) || 0,
         isLoading: false,
@@ -112,8 +124,9 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   },
 
   logout: async () => {
+    const currentUserId = get().user?.id;
     try {
-      await apiClient.post('/auth/logout').catch(() => {});
+      await apiClient.post('/auth/logout', { userId: currentUserId }).catch(() => {});
     } catch (e) {
       // ignore network errors on logout
     }
@@ -122,10 +135,12 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       AsyncStorage.removeItem(STORAGE_KEYS.ACCESS_TOKEN),
       AsyncStorage.removeItem(STORAGE_KEYS.REFRESH_TOKEN),
       AsyncStorage.removeItem(STORAGE_KEYS.USER_DATA),
+      AsyncStorage.removeItem(STORAGE_KEYS.SESSION_ID),
     ]);
 
     set({
       user: null,
+      sessionId: null,
       isAuthenticated: false,
       walletBalance: 0,
       error: null,

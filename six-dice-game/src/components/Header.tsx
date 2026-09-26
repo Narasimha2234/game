@@ -38,10 +38,10 @@ const Header: React.FC = () => {
         </View>
         <View style={styles.titleColumn}>
           <View style={styles.titleRow}>
-            <Text style={styles.title}>HEX</Text>
-            <Text style={styles.titleAccent}>ROLL 3D</Text>
+            <Text style={styles.title}>GOOD</Text>
+            <Text style={styles.titleAccent}>GUDI</Text>
           </View>
-          <Text style={styles.subtitle}>CASUAL RELIEF GAME</Text>
+          <Text style={styles.subtitle}>REAL-TIME DICE GAME</Text>
         </View>
       </View>
 

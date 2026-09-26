@@ -7,6 +7,8 @@ import api from "@/lib/axios";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { StopGameDialog } from "@/components/StopGameDialog";
 import {
   Gamepad2,
   Play,
@@ -30,9 +32,10 @@ import {
   Check,
   Flame,
   Star,
+  ShieldCheck,
 } from "lucide-react";
 
-// Dice Face Definitions corresponding to six-dice-game
+// Dice Face Definitions corresponding to Goodgudi mobile game
 export const DICE_FACES = [
   {
     id: 1,
@@ -123,6 +126,11 @@ export default function GamePanelPage() {
   const [betTimeSeconds, setBetTimeSeconds] = useState(30);
   const [rollTimeSeconds, setRollTimeSeconds] = useState(8);
   const [intervalTimeSeconds, setIntervalTimeSeconds] = useState(10);
+  const [minProfitPercentage, setMinProfitPercentage] = useState<number | null>(null);
+  const [customProfitInput, setCustomProfitInput] = useState<string>("");
+  const [profitSaving, setProfitSaving] = useState(false);
+  const [stopMessage, setStopMessage] = useState<string | null>(null);
+  const [isStopModalOpen, setIsStopModalOpen] = useState(false);
 
   // Staged Manual Dice (1 to 6)
   const [dice, setDice] = useState<number[]>([1, 2, 3, 4, 5, 6]);
@@ -164,6 +172,12 @@ export default function GamePanelPage() {
           setRollTimeSeconds(d.rollTimeSeconds || 8);
           setIntervalTimeSeconds(d.intervalTimeSeconds || 10);
           setServerPresetDice(d.presetDice || null);
+          if (d.minProfitPercentage !== undefined) {
+            setMinProfitPercentage(d.minProfitPercentage);
+          }
+          if (d.stopMessage !== undefined) {
+            setStopMessage(d.stopMessage || null);
+          }
 
           // If round is currently rolling or settled, show the live outcome dice
           if (d.phase === "ROLLING" || d.phase === "SETTLED") {
@@ -193,15 +207,39 @@ export default function GamePanelPage() {
 
   // Admin Control Handlers
   const handleSetMode = async (mode: "AUTOMATIC" | "MANUAL" | "STOPPED") => {
+    if (mode === "STOPPED") {
+      setIsStopModalOpen(true);
+      return;
+    }
+
     setActionLoading(true);
     try {
       await api.post("/api/game/control", {
         mode,
-        action: mode === "STOPPED" ? "stop" : "start",
+        action: "start",
       });
       setGameMode(mode);
+      setStopMessage(null);
     } catch (err: any) {
       alert(err.response?.data?.message || "Failed to update game mode");
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleConfirmStopGame = async (message: string) => {
+    setActionLoading(true);
+    try {
+      await api.post("/api/game/control", {
+        mode: "STOPPED",
+        action: "stop",
+        stopMessage: message,
+      });
+      setGameMode("STOPPED");
+      setStopMessage(message);
+    } catch (err: any) {
+      alert(err.response?.data?.message || "Failed to stop game");
+      throw err;
     } finally {
       setActionLoading(false);
     }
@@ -222,6 +260,36 @@ export default function GamePanelPage() {
       alert(err.response?.data?.message || "Failed to update timers");
     } finally {
       setActionLoading(false);
+    }
+  };
+
+  const handleSetMinProfit = async (pct: number | null) => {
+    setProfitSaving(true);
+    try {
+      await api.post("/api/game/control", {
+        minProfitPercentage: pct,
+      });
+      setMinProfitPercentage(pct);
+      if (pct !== null) {
+        setCustomProfitInput(String(pct));
+      } else {
+        setCustomProfitInput("");
+      }
+    } catch (err: any) {
+      alert(err.response?.data?.message || "Failed to update minimum profit target");
+    } finally {
+      setProfitSaving(false);
+    }
+  };
+
+  const handleApplyCustomProfit = (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    const val = parseFloat(customProfitInput);
+    if (isNaN(val) || val <= 0) {
+      handleSetMinProfit(null);
+    } else {
+      const clamped = Math.min(95, Math.max(1, Math.round(val)));
+      handleSetMinProfit(clamped);
     }
   };
 
@@ -394,57 +462,90 @@ export default function GamePanelPage() {
 
   return (
     <div className="min-h-screen bg-[#f8fafc] text-slate-900 flex flex-col font-sans selection:bg-indigo-600 selection:text-white">
-      {/* Top Clean Navigation Bar */}
-      <header className="sticky top-0 z-40 bg-white border-b border-slate-200 px-6 py-3.5 flex items-center justify-between shadow-xs">
-        <div className="flex items-center gap-4">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => router.push("/dashboard")}
-            className="text-slate-600 hover:text-slate-900 hover:bg-slate-100 transition-colors gap-1.5 border-slate-300 font-medium text-xs"
-          >
-            <ArrowLeft className="w-4 h-4" />
-            Back to Dashboard
-          </Button>
-          <div className="h-4 w-[1px] bg-slate-300" />
-          <div className="flex items-center gap-2.5">
-            <div className="p-2 rounded-xl bg-indigo-600 text-white shadow-xs">
-              <Gamepad2 className="w-5 h-5" />
+      {/* Top Clean Navigation Bar (Fully Responsive) */}
+      <header className="sticky top-0 z-40 bg-white border-b border-slate-200 px-4 sm:px-6 py-3 sm:py-3.5 shadow-xs">
+        <div className="max-w-[1700px] mx-auto flex flex-col md:flex-row md:items-center justify-between gap-3 sm:gap-4">
+          {/* Left Block: Back Button, Brand Icon & Title with Badges */}
+          <div className="flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-4 min-w-0">
+            {/* Top Navigation Row on Mobile (Back button + Mobile Status Chip) */}
+            <div className="flex items-center justify-between gap-3 shrink-0">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => router.push("/dashboard")}
+                className="text-slate-600 hover:text-slate-900 hover:bg-slate-100 transition-colors gap-1.5 border-slate-300 font-medium text-xs h-8 sm:h-9 shrink-0"
+              >
+                <ArrowLeft className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">Back to Dashboard</span>
+                <span className="sm:hidden">Dashboard</span>
+              </Button>
+
+              {/* Mobile-only compact Round & Phase Chip */}
+              <div className="flex md:hidden items-center gap-2">
+                <div className="bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1 flex items-center gap-2 shadow-2xs">
+                  <span className="text-[9px] uppercase font-bold tracking-wider text-slate-500">ROUND</span>
+                  <span className="text-xs font-extrabold text-indigo-700 font-mono">#{roundNumber}</span>
+                  <div className="h-3 w-[1px] bg-slate-300" />
+                  <span className="text-[10px] font-bold text-slate-800 uppercase">{gamePhase.replace("_", " ")}</span>
+                </div>
+              </div>
             </div>
-            <div>
-              <h1 className="text-base font-bold text-slate-900 flex items-center gap-2">
-                6-Dice Live Game Control Room
-                <Badge className={`border text-xs px-2.5 py-0.5 font-bold ${
-                  gameMode === "AUTOMATIC"
-                    ? "bg-emerald-100 border-emerald-300 text-emerald-800"
-                    : gameMode === "MANUAL"
-                    ? "bg-amber-100 border-amber-300 text-amber-800"
-                    : "bg-rose-100 border-rose-300 text-rose-800"
-                }`}>
-                  <span className="w-1.5 h-1.5 rounded-full mr-1.5 animate-pulse bg-current" />
-                  {gameMode} MODE
-                </Badge>
-              </h1>
-              <p className="text-xs text-slate-500">
-                {gameMode === "MANUAL"
-                  ? "Manual Mode Active: Admin controls dice outcomes or falls back to automatic"
-                  : "Automatic Mode Active: Continuous randomized rounds with auto-settlement"}
-              </p>
+
+            {/* Desktop Divider */}
+            <div className="hidden sm:block h-6 w-[1px] bg-slate-200 shrink-0" />
+
+            {/* Brand Title and Mode Indicators */}
+            <div className="flex items-center gap-2.5 sm:gap-3 min-w-0">
+              <div className="p-2 sm:p-2.5 rounded-xl bg-indigo-600 text-white shadow-xs shrink-0">
+                <Gamepad2 className="w-4 h-4 sm:w-5 sm:h-5" />
+              </div>
+              <div className="min-w-0 flex-1">
+                <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
+                  <h1 className="text-sm sm:text-base font-bold text-slate-900 leading-tight">
+                    Goodgudi Control Room
+                  </h1>
+                  <Badge className={`border text-[10px] sm:text-xs px-2 py-0.5 font-bold ${
+                    gameMode === "AUTOMATIC"
+                      ? "bg-emerald-100 border-emerald-300 text-emerald-800"
+                      : gameMode === "MANUAL"
+                      ? "bg-amber-100 border-amber-300 text-amber-800"
+                      : "bg-rose-100 border-rose-300 text-rose-800"
+                  }`}>
+                    <span className="w-1.5 h-1.5 rounded-full mr-1.5 animate-pulse bg-current" />
+                    {gameMode} MODE
+                  </Badge>
+                  {gameMode === "AUTOMATIC" && minProfitPercentage && minProfitPercentage > 0 && (
+                    <Badge className="bg-emerald-600 text-white border-0 text-[10px] sm:text-xs px-2 py-0.5 font-bold shadow-2xs">
+                      <TrendingUp className="w-3 h-3 mr-1 inline" />
+                      ≥{minProfitPercentage}% Min Profit
+                    </Badge>
+                  )}
+                </div>
+                <p className="text-[11px] sm:text-xs text-slate-500 mt-0.5 line-clamp-1 sm:line-clamp-none">
+                  {gameMode === "MANUAL"
+                    ? "Manual Mode Active: Admin controls dice outcomes or falls back to automatic"
+                    : gameMode === "STOPPED"
+                    ? `Game Paused: "${stopMessage || "Game temporarily paused by admin"}"`
+                    : minProfitPercentage && minProfitPercentage > 0
+                    ? `Automatic Mode Active: Profit Engine guaranteeing ≥ ${minProfitPercentage}% house margin with winner payouts`
+                    : "Automatic Mode Active: Continuous randomized rounds with auto-settlement"}
+                </p>
+              </div>
             </div>
           </div>
-        </div>
 
-        {/* Top Right Live Status Indicators */}
-        <div className="flex items-center gap-3">
-          <div className="bg-slate-50 border border-slate-200 rounded-xl px-4 py-1.5 flex items-center gap-4">
-            <div>
-              <div className="text-[10px] uppercase font-bold tracking-wider text-slate-500">ACTIVE ROUND</div>
-              <div className="text-sm font-extrabold text-indigo-700 font-mono">#{roundNumber}</div>
-            </div>
-            <div className="h-6 w-[1px] bg-slate-300" />
-            <div>
-              <div className="text-[10px] uppercase font-bold tracking-wider text-slate-500">PHASE</div>
-              <div className="text-xs font-bold text-slate-800 uppercase">{gamePhase.replace("_", " ")}</div>
+          {/* Desktop Right Live Status Indicators */}
+          <div className="hidden md:flex items-center gap-3 shrink-0">
+            <div className="bg-slate-50 border border-slate-200 rounded-xl px-4 py-1.5 flex items-center gap-4 shadow-2xs">
+              <div>
+                <div className="text-[10px] uppercase font-bold tracking-wider text-slate-500">ACTIVE ROUND</div>
+                <div className="text-sm font-extrabold text-indigo-700 font-mono">#{roundNumber}</div>
+              </div>
+              <div className="h-6 w-[1px] bg-slate-300" />
+              <div>
+                <div className="text-[10px] uppercase font-bold tracking-wider text-slate-500">PHASE</div>
+                <div className="text-xs font-bold text-slate-800 uppercase">{gamePhase.replace("_", " ")}</div>
+              </div>
             </div>
           </div>
         </div>
@@ -454,6 +555,51 @@ export default function GamePanelPage() {
       <main className="flex-1 max-w-[1700px] w-full mx-auto p-4 sm:p-6 grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
         {/* LEFT COLUMN (8 Cols): Mode Controls, Betting Pools & Fast Dice Builder */}
         <div className="lg:col-span-8 flex flex-col gap-6 w-full">
+          {/* Active Stop Notice Banner when game is STOPPED */}
+          {gameMode === "STOPPED" && (
+            <div className="bg-rose-50 border-2 border-rose-300 rounded-2xl p-4 flex flex-col md:flex-row md:items-center justify-between gap-4 shadow-xs">
+              <div className="flex items-start sm:items-center gap-3">
+                <div className="p-2.5 rounded-xl bg-rose-600 text-white shadow-xs shrink-0 mt-0.5 sm:mt-0">
+                  <Pause className="w-5 h-5" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-sm font-black text-rose-950 uppercase tracking-wider">
+                      Game Is Currently Stopped
+                    </span>
+                    <Badge className="bg-rose-600 text-white text-[10px] font-bold">
+                      Broadcasting to Mobile App
+                    </Badge>
+                  </div>
+                  <p className="text-xs text-rose-800 mt-1 font-medium">
+                    Player Screen Message:{" "}
+                    <span className="font-bold text-slate-900 bg-white/90 px-2 py-0.5 rounded border border-rose-200 italic">
+                      "{stopMessage || "Game is temporarily paused by admin. Please check back shortly."}"
+                    </span>
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2 shrink-0 self-end sm:self-auto">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => setIsStopModalOpen(true)}
+                  className="text-xs font-bold border-rose-300 text-rose-800 bg-white hover:bg-rose-100 h-9"
+                >
+                  Edit Notice
+                </Button>
+                <Button
+                  size="sm"
+                  onClick={() => handleSetMode("AUTOMATIC")}
+                  className="text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white shadow-xs h-9"
+                >
+                  <Play className="w-3.5 h-3.5 mr-1" />
+                  Resume (Auto)
+                </Button>
+              </div>
+            </div>
+          )}
+
           {/* 1. Mode Selector & Timer Configuration Card */}
           <Card className="bg-white border border-slate-200 shadow-xs rounded-2xl overflow-hidden">
             <CardHeader className="p-4 pb-3 border-b border-slate-100 bg-slate-50/50 flex flex-row items-center justify-between">
@@ -498,7 +644,9 @@ export default function GamePanelPage() {
                   </Button>
                   <Button
                     size="sm"
-                    onClick={() => handleSetMode("STOPPED")}
+                    onClick={() => {
+                      setIsStopModalOpen(true);
+                    }}
                     className={`text-xs font-bold transition-all h-9 ${
                       gameMode === "STOPPED"
                         ? "bg-rose-600 hover:bg-rose-700 text-white shadow-xs"
@@ -506,7 +654,7 @@ export default function GamePanelPage() {
                     }`}
                   >
                     <Pause className="w-3.5 h-3.5 mr-1" />
-                    Stop
+                    {gameMode === "STOPPED" ? "Notice" : "Stop"}
                   </Button>
                 </div>
               </div>
@@ -574,6 +722,156 @@ export default function GamePanelPage() {
                 </div>
               </div>
             </CardContent>
+
+            {/* Auto Mode Minimum Profit Target Engine (Displayed ONLY when in AUTOMATIC mode) */}
+            {gameMode === "AUTOMATIC" && (
+              <div className="border-t border-slate-200/80 bg-slate-50/50 p-4 sm:p-5">
+                <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 pb-3 border-b border-slate-200/70">
+                  <div className="flex items-center gap-2.5">
+                    <div className="p-2 rounded-xl bg-emerald-600 text-white shadow-xs">
+                      <TrendingUp className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm font-bold text-slate-800 uppercase tracking-wider">
+                          Auto-Mode Minimum Profit Target
+                        </span>
+                        {minProfitPercentage && minProfitPercentage > 0 ? (
+                          <Badge className="bg-emerald-100 text-emerald-800 border-emerald-300 font-bold text-[11px] px-2 py-0.5">
+                            <Check className="w-3 h-3 mr-1 inline" />
+                            {minProfitPercentage}% Guaranteed Margin Active
+                          </Badge>
+                        ) : (
+                          <Badge variant="outline" className="text-slate-500 border-slate-300 bg-white font-medium text-[11px]">
+                            Off (100% Pure Random)
+                          </Badge>
+                        )}
+                      </div>
+                      <p className="text-xs text-slate-500 mt-0.5">
+                        Optional: In Auto Mode, the engine calculates results so the game guarantees at least this profit % from the round's total bets, while rewarding winning players whenever possible.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Controls Row */}
+                <div className="mt-4 flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+                  {/* Presets */}
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <span className="text-xs font-bold text-slate-600 uppercase tracking-wider mr-1">Presets:</span>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={profitSaving}
+                      onClick={() => handleSetMinProfit(null)}
+                      className={`text-xs h-9 px-3 font-bold transition-all ${
+                        minProfitPercentage === null || minProfitPercentage <= 0
+                          ? "bg-slate-800 text-white border-slate-800 shadow-xs"
+                          : "bg-white text-slate-700 border-slate-300 hover:bg-slate-100"
+                      }`}
+                    >
+                      Off (Random)
+                    </Button>
+                    {[10, 20, 30, 40, 50].map((pct) => (
+                      <Button
+                        key={pct}
+                        size="sm"
+                        variant="outline"
+                        disabled={profitSaving}
+                        onClick={() => handleSetMinProfit(pct)}
+                        className={`text-xs h-9 px-3 font-bold transition-all ${
+                          minProfitPercentage === pct
+                            ? "bg-emerald-600 text-white border-emerald-600 shadow-xs"
+                            : "bg-white text-slate-700 border-slate-300 hover:bg-emerald-50 hover:text-emerald-700"
+                        }`}
+                      >
+                        {pct}%
+                      </Button>
+                    ))}
+                  </div>
+
+                  {/* Custom Percentage Input Form */}
+                  <form onSubmit={handleApplyCustomProfit} className="flex items-center gap-2">
+                    <div className="relative w-36">
+                      <Input
+                        type="number"
+                        min={1}
+                        max={95}
+                        step={1}
+                        placeholder="Custom %"
+                        value={customProfitInput}
+                        onChange={(e) => setCustomProfitInput(e.target.value)}
+                        className="h-9 pr-7 text-xs font-bold text-slate-800 bg-white"
+                        disabled={profitSaving}
+                      />
+                      <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-xs font-bold text-slate-400 pointer-events-none">
+                        %
+                      </span>
+                    </div>
+                    <Button
+                      type="submit"
+                      size="sm"
+                      disabled={profitSaving || !customProfitInput}
+                      className="h-9 text-xs font-bold bg-indigo-600 hover:bg-indigo-700 text-white shadow-xs px-3"
+                    >
+                      {profitSaving ? (
+                        <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                      ) : (
+                        "Set Target"
+                      )}
+                    </Button>
+                    {minProfitPercentage !== null && (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => handleSetMinProfit(null)}
+                        className="h-9 text-xs text-rose-600 hover:text-rose-700 hover:bg-rose-50 px-2"
+                        title="Disable Profit Constraint"
+                      >
+                        Reset
+                      </Button>
+                    )}
+                  </form>
+                </div>
+
+                {/* Dynamic Live Calculation Card */}
+                <div className="mt-3.5 p-3 rounded-xl bg-white border border-slate-200/90 shadow-2xs flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div className="flex items-center gap-2.5">
+                    <div className={`p-1.5 rounded-lg ${minProfitPercentage ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-600"}`}>
+                      <ShieldCheck className="w-4 h-4" />
+                    </div>
+                    <div className="text-xs">
+                      {minProfitPercentage && minProfitPercentage > 0 ? (
+                        <div>
+                          <span className="font-bold text-slate-800">
+                            Active Protection: Round #{roundNumber}
+                          </span>
+                          <div className="text-slate-600 mt-0.5">
+                            Round Pool: <strong className="font-mono text-slate-900">₹{totalBetPool.toLocaleString()}</strong>
+                            <span className="mx-1.5 text-slate-300">|</span>
+                            Target House Profit: <strong className="font-mono text-emerald-700">≥ ₹{Math.round(totalBetPool * (minProfitPercentage / 100)).toLocaleString()} ({minProfitPercentage}%)</strong>
+                            <span className="mx-1.5 text-slate-300">|</span>
+                            Allowed Winner Payouts: <strong className="font-mono text-indigo-700">≤ ₹{Math.round(totalBetPool * (1 - minProfitPercentage / 100)).toLocaleString()}</strong>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="text-slate-600">
+                          <span className="font-bold text-slate-700">Status: Pure Random Mode.</span> All dice faces have an unbiased 1-in-6 probability with standard payout returns.
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {minProfitPercentage && minProfitPercentage > 0 && (
+                    <div className="text-[11px] text-emerald-700 bg-emerald-50 px-2.5 py-1 rounded-lg border border-emerald-200 font-semibold self-start sm:self-auto shrink-0 flex items-center gap-1.5">
+                      <Sparkles className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                      <span>Pays winners while protecting ≥{minProfitPercentage}%</span>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
           </Card>
 
           {/* 2. LIVE PLAYER BETTING POOLS */}
@@ -855,36 +1153,7 @@ export default function GamePanelPage() {
                   <span className="text-xs text-slate-500 font-medium">1-Click instant configuration</span>
                 </div>
 
-                {/* Category 1: House Strategy */}
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="text-xs font-bold text-slate-500 min-w-[100px]">House Strategy:</span>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => applyPreset("lowest_pool")}
-                    className="text-xs h-8 border-emerald-300 bg-emerald-50 text-emerald-800 hover:bg-emerald-100 gap-1.5 font-bold shadow-2xs"
-                  >
-                    💎 Max House Profit (Lowest/Zero Pool)
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => applyPreset("lowest_split")}
-                    className="text-xs h-8 border-emerald-300 bg-emerald-50/70 text-emerald-800 hover:bg-emerald-100 gap-1.5 font-semibold"
-                  >
-                    🥈 2 Lowest Split (3x + 3x)
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => applyPreset("highest_pool")}
-                    className="text-xs h-8 border-rose-300 bg-rose-50 text-rose-800 hover:bg-rose-100 gap-1.5 font-bold"
-                  >
-                    🔥 Max Player Payout (Jackpot Pool)
-                  </Button>
-                </div>
-
-                {/* Category 2: Single Face Multipliers */}
+                {/* Category 1: Single Face Multipliers */}
                 <div className="flex flex-wrap items-center gap-2">
                   <span className="text-xs font-bold text-slate-500 min-w-[100px]">All 6x Multipliers:</span>
                   <Button
@@ -1089,6 +1358,11 @@ export default function GamePanelPage() {
                         </span>
                         <span className={`font-mono font-bold ${profit >= 0 ? "text-emerald-700" : "text-rose-700"}`}>
                           House: {profit >= 0 ? `+₹${profit.toLocaleString()}` : `-₹${Math.abs(profit).toLocaleString()}`}
+                          {rh.totalBetsAmount > 0 && (
+                            <span className="text-[10px] text-slate-500 font-normal ml-1">
+                              ({Math.round((profit / rh.totalBetsAmount) * 100)}%)
+                            </span>
+                          )}
                         </span>
                       </div>
                     </div>
@@ -1099,6 +1373,14 @@ export default function GamePanelPage() {
           </Card>
         </div>
       </main>
+      {/* Stop Game Reason Dialog */}
+      <StopGameDialog
+        open={isStopModalOpen}
+        onOpenChange={setIsStopModalOpen}
+        currentMessage={stopMessage}
+        isAlreadyStopped={gameMode === "STOPPED"}
+        onConfirm={handleConfirmStopGame}
+      />
     </div>
   );
 }

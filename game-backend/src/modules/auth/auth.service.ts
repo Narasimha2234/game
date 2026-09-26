@@ -1,8 +1,10 @@
-import { Injectable, UnauthorizedException } from '@nestjs/common';
+import { Injectable, UnauthorizedException, ConflictException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import * as bcrypt from 'bcrypt';
+import { randomUUID } from 'node:crypto';
 import { UserService } from '../user/user.service.js';
+import { UserRole } from '../user/roles/user.role.js';
 
 @Injectable()
 export class AuthService {
@@ -12,25 +14,56 @@ export class AuthService {
     private readonly userService: UserService,
   ) {}
 
-  async login(mobile: string, password: string) {
+  async login(
+    mobile: string,
+    password: string,
+    deviceId?: string,
+    clientSessionId?: string,
+  ) {
     // userService.login validates credentials and returns sanitized user
     const user = await this.userService.login({ mobile, password });
     if (!user) throw new UnauthorizedException('Invalid credentials');
+
+    // Strict Single-Device Enforcement
+    if (user.role === UserRole.USER) {
+      const fullUser = await this.userService.getUserById(user.id);
+      const now = Date.now();
+      const lastActiveTime = fullUser.lastActiveAt ? new Date(fullUser.lastActiveAt).getTime() : 0;
+      const isCurrentlyActive = !!(fullUser.activeSessionId && (now - lastActiveTime < 60 * 1000));
+
+      // Same device check: if re-logging in on the exact same device, allow immediately
+      const isSameDevice = !!(
+        (deviceId && fullUser.activeDeviceId === deviceId) ||
+        (clientSessionId && fullUser.activeSessionId === clientSessionId)
+      );
+
+      if (isCurrentlyActive && !isSameDevice) {
+        throw new ConflictException(
+          'This account is already active in another device. Only 1 active device is allowed per account. Please logout from the old device to login here.',
+        );
+      }
+    }
 
     const tokens = await this.getTokens(user.id, user.role);
     // hash and store refresh token
     const hashed = await bcrypt.hash(tokens.refreshToken, 10);
     await this.userService.setRefreshToken(user.id, hashed);
 
+    // Generate and register active session
+    const sessionId = randomUUID();
+    await this.userService.updateActiveSession(user.id, sessionId, deviceId || 'Mobile App');
+
     return {
       accessToken: tokens.accessToken,
       refreshToken: tokens.refreshToken,
+      sessionId,
       user,
     };
   }
 
   async logout(userId: string) {
     await this.userService.setRefreshToken(userId, null);
+    await this.userService.clearActiveSession(userId);
     return { ok: true };
   }
 

@@ -201,4 +201,73 @@ export class UserService implements OnModuleInit {
         }
         return this.userRepository.save(user);
     }
+
+    public async resetUserPassword(userId: string, newPassword: string): Promise<User> {
+        const trimmed = newPassword?.trim();
+        if (!trimmed || trimmed.length < 6) {
+            throw new BadRequestException("Password must be at least 6 characters long");
+        }
+
+        const user = await this.getUserById(userId);
+        const hashedPassword = await bcrypt.hash(trimmed, 10);
+        user.password = hashedPassword;
+        user.refreshToken = null; // Invalidate any existing active session tokens
+
+        const savedUser = await this.userRepository.save(user);
+        this.logger.log(`Password reset successfully for user: ${user.mobile || user.name || user.id}`);
+        return savedUser;
+    }
+
+    public async updateActiveSession(userId: string, sessionId: string, deviceId?: string): Promise<void> {
+        await this.userRepository.update(userId, {
+            activeSessionId: sessionId,
+            lastActiveAt: new Date(),
+            activeDeviceId: deviceId || 'Mobile App',
+        });
+        this.logger.log(`Active session set for user ${userId}: ${sessionId.slice(0, 8)}... (${deviceId || 'Mobile'})`);
+    }
+
+    public async clearActiveSession(userId: string): Promise<void> {
+        await this.userRepository.update(userId, {
+            activeSessionId: null,
+            lastActiveAt: null,
+            activeDeviceId: null,
+            refreshToken: null,
+        });
+        this.logger.log(`Active session cleared for user ${userId}`);
+    }
+
+    public async validateAndUpdateSession(userId: string, sessionId?: string): Promise<boolean> {
+        try {
+            const user = await this.userRepository.findOne({ where: { id: userId } });
+            if (!user || user.isActive === false) {
+                return false;
+            }
+
+            // Admins are not restricted to single device session
+            if (user.role === UserRole.ADMIN) {
+                return true;
+            }
+
+            // If player has an active session and client supplied one, check match
+            if (user.activeSessionId && sessionId) {
+                if (user.activeSessionId !== sessionId) {
+                    this.logger.warn(`Session mismatch for user ${user.mobile || user.id}. Active: ${user.activeSessionId}, Received: ${sessionId}`);
+                    return false;
+                }
+            }
+
+            // Throttle heartbeat DB update to at most once every 5 seconds
+            const now = Date.now();
+            const lastActiveTime = user.lastActiveAt ? new Date(user.lastActiveAt).getTime() : 0;
+            if (now - lastActiveTime > 5000) {
+                await this.userRepository.update(userId, { lastActiveAt: new Date() });
+            }
+
+            return true;
+        } catch (err) {
+            this.logger.error(`Error validating session for user ${userId}`, err instanceof Error ? err.stack : undefined);
+            return true;
+        }
+    }
 }

@@ -135,7 +135,7 @@ export class GameService implements OnModuleInit, OnModuleDestroy {
   private async transitionToRolling() {
     if (!this.activeRound) return;
 
-    // Generate random 6 dice results (or use admin manual preset)
+    // Generate random 6 dice results (or use admin manual preset, or auto minimum profit calculator)
     let finalDice: number[];
     if (this.presetDice && Array.isArray(this.presetDice) && this.presetDice.length === 6) {
       finalDice = [...this.presetDice];
@@ -143,10 +143,25 @@ export class GameService implements OnModuleInit, OnModuleDestroy {
         `[MANUAL MODE] Using admin configured dice for Round #${this.activeRound.roundNumber}: [${finalDice.join(", ")}]`,
       );
       this.presetDice = null; // Clear after applying to this round
+    } else if (
+      this.activeRound.mode === GameMode.AUTOMATIC &&
+      typeof this.activeRound.minProfitPercentage === "number" &&
+      this.activeRound.minProfitPercentage > 0
+    ) {
+      const currentBets = await this.gameBetRepository.find({
+        where: [
+          { round: { id: this.activeRound.id } },
+          { roundNumber: this.activeRound.roundNumber },
+        ],
+      });
+      finalDice = this.calculateProfitConstrainedDice(
+        currentBets,
+        this.activeRound.minProfitPercentage,
+      );
     } else {
       finalDice = Array.from({ length: 6 }, () => Math.floor(Math.random() * 6) + 1);
       this.logger.log(
-        `[FALLBACK] Random dice generated for Round #${this.activeRound.roundNumber}: [${finalDice.join(", ")}]`,
+        `[AUTO PURE RANDOM] Random dice generated for Round #${this.activeRound.roundNumber}: [${finalDice.join(", ")}]`,
       );
     }
 
@@ -159,6 +174,131 @@ export class GameService implements OnModuleInit, OnModuleDestroy {
     this.logger.log(
       `Round #${this.activeRound.roundNumber} rolling started for ${rollDuration}s with dice: [${finalDice.join(", ")}]`,
     );
+  }
+
+  /**
+   * Calculates optimal 6-dice outcome to guarantee admin minimum profit percentage
+   * while giving money to winning players whenever possible.
+   */
+  private calculateProfitConstrainedDice(
+    bets: GameBet[],
+    minProfitPercentage: number,
+  ): number[] {
+    const totalPool = bets.reduce((sum, b) => sum + (b.amount || 0), 0);
+    if (totalPool <= 0) {
+      return Array.from({ length: 6 }, () => Math.floor(Math.random() * 6) + 1);
+    }
+
+    // Tally total bets by face (1 to 6)
+    const faceBets: { [face: number]: number } = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0, 6: 0 };
+    for (const b of bets) {
+      if (b.selectedNumber >= 1 && b.selectedNumber <= 6) {
+        faceBets[b.selectedNumber] += b.amount;
+      }
+    }
+
+    const minRequiredProfit = totalPool * (minProfitPercentage / 100);
+
+    // Compute payout for a given 6-face count distribution [c1, c2, c3, c4, c5, c6]
+    const computePayout = (counts: number[]) => {
+      let payout = 0;
+      for (let face = 1; face <= 6; face++) {
+        const count = counts[face - 1];
+        if (count > 0 && faceBets[face] > 0) {
+          payout += faceBets[face] * (1 + count);
+        }
+      }
+      return payout;
+    };
+
+    // Generate all 462 partitions of 6 dice across 6 faces (c1+c2+c3+c4+c5+c6 = 6)
+    const allDistributions: number[][] = [];
+    const generatePartitions = (current: number[], remainingDice: number, faceIndex: number) => {
+      if (faceIndex === 5) {
+        current.push(remainingDice);
+        allDistributions.push([...current]);
+        current.pop();
+        return;
+      }
+      for (let count = 0; count <= remainingDice; count++) {
+        current.push(count);
+        generatePartitions(current, remainingDice - count, faceIndex + 1);
+        current.pop();
+      }
+    };
+    generatePartitions([], 6, 0);
+
+    interface ScoredDist {
+      counts: number[];
+      payout: number;
+      profit: number;
+      profitPct: number;
+    }
+
+    const validWithWinners: ScoredDist[] = [];
+    const validZeroPayout: ScoredDist[] = [];
+    let bestProfitDist: ScoredDist | null = null;
+
+    for (const counts of allDistributions) {
+      const payout = computePayout(counts);
+      const profit = totalPool - payout;
+      const profitPct = (profit / totalPool) * 100;
+      const scored: ScoredDist = { counts, payout, profit, profitPct };
+
+      if (!bestProfitDist || profit > bestProfitDist.profit) {
+        bestProfitDist = scored;
+      }
+
+      if (profit >= minRequiredProfit) {
+        if (payout > 0) {
+          validWithWinners.push(scored);
+        } else {
+          validZeroPayout.push(scored);
+        }
+      }
+    }
+
+    let chosenDist: ScoredDist;
+    if (validWithWinners.length > 0) {
+      // Prioritize exciting rounds where players win while house meets or exceeds target profit
+      const randIdx = Math.floor(Math.random() * validWithWinners.length);
+      chosenDist = validWithWinners[randIdx];
+      this.logger.log(
+        `[AUTO PROFIT ENGINE] Selected outcome with winners! Total Pool: ₹${totalPool}, Payout: ₹${chosenDist.payout}, House Profit: ₹${chosenDist.profit} (${chosenDist.profitPct.toFixed(1)}% >= target ${minProfitPercentage}%)`,
+      );
+    } else if (validZeroPayout.length > 0) {
+      // If no valid outcome could pay winners and meet target profit, pick a zero-payout outcome
+      const randIdx = Math.floor(Math.random() * validZeroPayout.length);
+      chosenDist = validZeroPayout[randIdx];
+      this.logger.log(
+        `[AUTO PROFIT ENGINE] Target ${minProfitPercentage}% met with zero payout outcome (Total Pool: ₹${totalPool}, Profit: 100%).`,
+      );
+    } else if (bestProfitDist) {
+      // In edge cases where bets are spread across all faces and mathematically impossible to reach exact target %, use highest profit outcome
+      chosenDist = bestProfitDist;
+      this.logger.warn(
+        `[AUTO PROFIT ENGINE] Target ${minProfitPercentage}% mathematically unreachable with spread bets. Using highest profit outcome: ₹${chosenDist.profit} (${chosenDist.profitPct.toFixed(1)}%)`,
+      );
+    } else {
+      return Array.from({ length: 6 }, () => Math.floor(Math.random() * 6) + 1);
+    }
+
+    // Convert face counts to 6-dice array and shuffle for natural appearance
+    const dice: number[] = [];
+    for (let face = 1; face <= 6; face++) {
+      const count = chosenDist.counts[face - 1];
+      for (let k = 0; k < count; k++) {
+        dice.push(face);
+      }
+    }
+
+    // Fisher-Yates shuffle
+    for (let i = dice.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [dice[i], dice[j]] = [dice[j], dice[i]];
+    }
+
+    return dice;
   }
 
   private async settleRound() {
@@ -243,6 +383,8 @@ export class GameService implements OnModuleInit, OnModuleDestroy {
       betTimeSeconds: this.activeRound.betTimeSeconds || 30,
       rollTimeSeconds: this.activeRound.rollTimeSeconds || 8,
       intervalTimeSeconds: this.activeRound.intervalTimeSeconds || 10,
+      minProfitPercentage: this.activeRound.minProfitPercentage ?? null,
+      stopMessage: this.activeRound.stopMessage ?? null,
       phaseEndsAt: new Date(Date.now() + betDuration * 1000),
       totalBetsAmount: 0,
       totalPayoutAmount: 0,
@@ -379,6 +521,8 @@ export class GameService implements OnModuleInit, OnModuleDestroy {
       intervalTimeSeconds: this.activeRound!.intervalTimeSeconds || 10,
       diceResults: this.activeRound!.diceResults || [1, 2, 3, 4, 5, 6],
       presetDice: this.presetDice,
+      minProfitPercentage: this.activeRound!.minProfitPercentage ?? null,
+      stopMessage: this.activeRound!.stopMessage ?? null,
       betPools: poolTotals,
       myBets: userBetsForRound,
       lastRoundUserResult,
@@ -398,8 +542,39 @@ export class GameService implements OnModuleInit, OnModuleDestroy {
       await this.initActiveRound();
     }
 
-    if (dto.mode) {
+    if (dto.mode === GameMode.STOPPED || dto.action === "stop") {
+      this.activeRound!.mode = GameMode.STOPPED;
+      if (dto.stopMessage !== undefined) {
+        this.activeRound!.stopMessage = dto.stopMessage ? dto.stopMessage.trim() : null;
+      }
+      if (!this.activeRound!.stopMessage) {
+        this.activeRound!.stopMessage = "Game is temporarily paused by admin. Please check back shortly.";
+      }
+      this.logger.log(`Game stopped by admin with message: "${this.activeRound!.stopMessage}"`);
+    } else if (dto.mode === GameMode.AUTOMATIC || dto.mode === GameMode.MANUAL || dto.action === "start") {
+      if (dto.mode) {
+        this.activeRound!.mode = dto.mode;
+      }
+      // When resuming/starting, clear the stop message
+      this.activeRound!.stopMessage = null;
+      this.logger.log(`Game started / resumed by admin in ${this.activeRound!.mode} mode`);
+    } else if (dto.mode) {
       this.activeRound!.mode = dto.mode;
+    }
+
+    if (dto.stopMessage !== undefined && this.activeRound!.mode === GameMode.STOPPED) {
+      this.activeRound!.stopMessage = dto.stopMessage ? dto.stopMessage.trim() : null;
+    }
+
+    if (dto.minProfitPercentage !== undefined) {
+      if (dto.minProfitPercentage === null || dto.minProfitPercentage <= 0) {
+        this.activeRound!.minProfitPercentage = null;
+        this.logger.log("Admin disabled minimum profit constraint (pure random auto mode)");
+      } else {
+        const clamped = Math.min(95, Math.max(1, Number(dto.minProfitPercentage)));
+        this.activeRound!.minProfitPercentage = clamped;
+        this.logger.log(`Admin set minimum profit percentage: ${clamped}%`);
+      }
     }
 
     if (dto.betTimeSeconds && dto.betTimeSeconds >= 5) {
@@ -421,6 +596,7 @@ export class GameService implements OnModuleInit, OnModuleDestroy {
 
     if (dto.action === "start") {
       this.activeRound!.mode = dto.mode || this.activeRound!.mode || GameMode.AUTOMATIC;
+      this.activeRound!.stopMessage = null;
       if (this.activeRound!.phase === GameRoundPhase.SETTLED) {
         await this.spawnNextRound();
       } else {
@@ -456,7 +632,8 @@ export class GameService implements OnModuleInit, OnModuleDestroy {
     }
 
     if (this.activeRound!.mode === GameMode.STOPPED) {
-      throw new BadRequestException("Game is currently paused. Please wait for admin to start.");
+      const msg = this.activeRound!.stopMessage || "Game is currently paused. Please wait for admin to start.";
+      throw new BadRequestException(msg);
     }
 
     if (!Number.isInteger(selectedNumber) || selectedNumber < 1 || selectedNumber > 6) {

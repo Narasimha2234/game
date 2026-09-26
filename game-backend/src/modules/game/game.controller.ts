@@ -2,15 +2,26 @@ import { Body, Controller, Get, Param, Post, Query } from "@nestjs/common";
 import { PlaceBetDto } from "./dto/place-bet.dto.js";
 import { GameControlDto } from "./dto/game-control.dto.js";
 import { GameService } from "./game.service.js";
+import { UserService } from "../user/user.service.js";
 
 @Controller("api/game")
 export class GameController {
-  constructor(private readonly gameService: GameService) {}
+  constructor(
+    private readonly gameService: GameService,
+    private readonly userService: UserService,
+  ) {}
 
   @Get("state")
-  async getGameState(@Query("userId") userId?: string) {
+  async getGameState(
+    @Query("userId") userId?: string,
+    @Query("sessionId") sessionId?: string,
+  ) {
     const state = await this.gameService.getGameState(userId);
-    return { success: true, data: state };
+    let sessionValid = true;
+    if (userId) {
+      sessionValid = await this.userService.validateAndUpdateSession(userId, sessionId);
+    }
+    return { success: true, sessionValid, data: state };
   }
 
   @Post("control")

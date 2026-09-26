@@ -22,6 +22,12 @@ export class User{
     isActive: boolean
     @Column({ type: 'text', nullable: true })
     refreshToken?: string | null
+    @Column({ type: 'varchar', nullable: true })
+    activeSessionId?: string | null
+    @Column({ type: 'timestamp', nullable: true })
+    lastActiveAt?: Date | null
+    @Column({ type: 'varchar', nullable: true })
+    activeDeviceId?: string | null
     @CreateDateColumn({type:"timestamp"})
     createdAt:Date
     @UpdateDateColumn()

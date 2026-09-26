@@ -21,3 +21,8 @@ export class WalletActionDto {
     note?: string;
     isHidden?: boolean;
 }
+
+export class ResetPasswordDto {
+    password: string;
+}
+
